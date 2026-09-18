@@ -1,0 +1,91 @@
+/*
+ * Copyright 2026 Adobe Systems Incorporated
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+import { test } from 'node:test';
+import assert from 'node:assert/strict';
+import scanExposure from '../../tools/apps/meridian/core/exposure.js';
+import buildFixture from '../../tools/apps/meridian/seed/informatica.js';
+
+const NOW = '2026-09-08T00:00:00Z';
+
+function countByKind(findings) {
+  return findings.reduce((acc, f) => {
+    acc[f.kind] = (acc[f.kind] ?? 0) + 1;
+    return acc;
+  }, {});
+}
+
+test('Phase 1 acceptance: the four planted exposures surface, and nothing else', async () => {
+  const fixture = await buildFixture();
+  const findings = scanExposure({ ...fixture, now: NOW });
+  const counts = countByKind(findings);
+
+  assert.equal(counts.stale, 1, 'one stale market (it_it)');
+  assert.equal(counts['missing-required'], 3, 'three markets missing compliance');
+  assert.equal(counts.drift, 4, 'four Spanish markets drift on the brand term');
+  assert.equal(counts.uncovered, 1, 'one uncovered market (ja_jp)');
+  assert.equal(counts['low-confidence'] ?? 0, 0, 'no low-confidence in the seed');
+  assert.equal(findings.length, 9, 'exactly the planted findings, nothing else');
+});
+
+test('the exposure scan writes nothing (returns a plain array)', async () => {
+  const fixture = await buildFixture();
+  const canonicalBefore = JSON.stringify(fixture.canonical);
+  const findings = scanExposure({ ...fixture, now: NOW });
+  assert.ok(Array.isArray(findings));
+  assert.equal(JSON.stringify(fixture.canonical), canonicalBefore, 'canonical untouched');
+});
+
+test('the clean baseline market produces no findings', async () => {
+  const fixture = await buildFixture();
+  const findings = scanExposure({ ...fixture, now: NOW });
+  assert.equal(findings.filter((f) => f.locale === 'en_us').length, 0);
+});
+
+test('missing compliance is reported critical', async () => {
+  const fixture = await buildFixture();
+  const findings = scanExposure({ ...fixture, now: NOW });
+  const compliance = findings.filter((f) => f.kind === 'missing-required');
+  assert.ok(compliance.length > 0 && compliance.every((f) => f.severity === 'critical'));
+});
+
+test('low-confidence: an auto-applied block below threshold is flagged', () => {
+  const canonical = {
+    id: 'c', title: 't', updated: NOW, blocks: [],
+  };
+  const layer = {
+    locale: 'es_mx',
+    canonicalId: 'c',
+    entries: [{
+      blockId: 'hero',
+      layer: 'language',
+      operation: 'translate',
+      value: {},
+      reason: 'r',
+      provenance: 'agent',
+      confidence: 0.5,
+      status: 'auto-applied',
+    }],
+  };
+  const findings = scanExposure({
+    canonical,
+    policies: [{ locale: 'es_mx', requiredLayers: [] }],
+    layers: new Map([['es_mx', layer]]),
+    stored: new Map(),
+    now: NOW,
+  });
+  assert.equal(findings.filter((f) => f.kind === 'low-confidence').length, 1);
+});
