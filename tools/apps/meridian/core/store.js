@@ -71,6 +71,12 @@ export function livePath(base, locale, id) {
   return `${base}/live/${locale}/${relPath(id)}.json`;
 }
 
+export function queuePath(base, locale, id) {
+  assertLocale(locale);
+  assertCanonicalId(id);
+  return `${base}/taste-queue/${locale}/${relPath(id)}.json`;
+}
+
 export default class DaStore {
   #org;
 
@@ -151,6 +157,24 @@ export default class DaStore {
 
   async deleteVariant(locale, canonicalId) {
     const resp = await daFetch(this.#sourceUrl(this.#livePath(locale, canonicalId)), { method: 'DELETE' });
+    if (!resp.ok && resp.status !== 404) throw new Error(`Delete failed (${resp.status})`);
+  }
+
+  // Taste queue: a gated recompute waiting on human judgement (PRD §6). One
+  // pending item per locale+canonical, keyed the same way as a live variant.
+  writeQueueItem(item) {
+    return this.#writeJson(queuePath(this.#base, item.locale, item.canonicalId), item);
+  }
+
+  readQueueItem(locale, canonicalId) {
+    return this.#readJson(queuePath(this.#base, locale, canonicalId));
+  }
+
+  async removeQueueItem(locale, canonicalId) {
+    const resp = await daFetch(
+      this.#sourceUrl(queuePath(this.#base, locale, canonicalId)),
+      { method: 'DELETE' },
+    );
     if (!resp.ok && resp.status !== 404) throw new Error(`Delete failed (${resp.status})`);
   }
 }
