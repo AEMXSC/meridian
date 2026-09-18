@@ -1,0 +1,174 @@
+/*
+ * Copyright 2026 Adobe Systems Incorporated
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+:host {
+  display: block;
+  padding: 16px 24px;
+  font-family: var(--body-font-family, system-ui, sans-serif);
+  color: #1d1d1d;
+}
+
+.mrd-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+
+.mrd-toolbar h1 {
+  font-size: 20px;
+  margin: 0;
+}
+
+.mrd-form {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.nx-alert.warning {
+  margin: 12px 0;
+  padding: 8px 12px;
+  border-radius: 6px;
+  background: #fff4d5;
+  color: #674d00;
+}
+
+.mrd-loading,
+.mrd-empty {
+  padding: 24px 0;
+  color: #6e6e6e;
+}
+
+.mrd-summary {
+  display: flex;
+  gap: 16px;
+  margin: 16px 0 8px;
+  font-weight: 700;
+}
+
+.mrd-summary .mrd-critical { color: #d31510; }
+.mrd-summary .mrd-warning { color: #e68619; }
+
+.mrd-list {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.mrd-market {
+  border: 1px solid #e1e1e1;
+  border-radius: 8px;
+  padding: 12px 16px;
+}
+
+.mrd-market-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 8px;
+}
+
+.mrd-market-head .mrd-status svg {
+  width: 20px;
+  height: 20px;
+}
+
+.mrd-locale {
+  font-weight: 700;
+  font-size: 15px;
+}
+
+.mrd-diff-btn {
+  margin-left: auto;
+}
+
+.mrd-finding {
+  display: flex;
+  gap: 10px;
+  align-items: baseline;
+  padding: 4px 0;
+  border-top: 1px solid #f0f0f0;
+}
+
+.mrd-kind {
+  flex: 0 0 auto;
+  font-size: 12px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  padding: 1px 8px;
+  border-radius: 10px;
+  background: #f0f0f0;
+}
+
+.mrd-finding.mrd-critical .mrd-kind {
+  background: #ffe0dd;
+  color: #d31510;
+}
+
+.mrd-finding.mrd-warning .mrd-kind {
+  background: #fff0d5;
+  color: #b06f00;
+}
+
+.mrd-detail {
+  color: #4b4b4b;
+  font-size: 14px;
+}
+
+.mrd-diff {
+  margin-top: 10px;
+  border-top: 1px dashed #d1d1d1;
+  padding-top: 8px;
+}
+
+.mrd-diff-row {
+  margin-bottom: 8px;
+}
+
+.mrd-diff-block {
+  font-weight: 700;
+  margin-right: 8px;
+}
+
+.mrd-diff-status {
+  font-size: 12px;
+  text-transform: uppercase;
+}
+
+.mrd-diff-status.mrd-changed { color: #e68619; }
+.mrd-diff-status.mrd-added { color: #0ba45d; }
+.mrd-diff-status.mrd-removed { color: #d31510; }
+
+.mrd-diff-cols {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+  margin-top: 4px;
+}
+
+.mrd-diff-cols pre {
+  margin: 0;
+  padding: 8px;
+  border-radius: 6px;
+  font-size: 12px;
+  overflow: auto;
+  white-space: pre-wrap;
+}
+
+.mrd-expected { background: #eaf6ee; }
+.mrd-actual { background: #fdeceb; }

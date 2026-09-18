@@ -117,6 +117,12 @@ export default class DaStore {
     if (!resp.ok) throw new Error(`Write failed for ${path} (${resp.status})`);
   }
 
+  // The market policy set for a scan: { canonicalId, policies[] }. Lives at
+  // {base}/config.json, authored alongside the content.
+  readConfig() {
+    return this.#readJson(`${this.#base}/config.json`);
+  }
+
   async readCanonical(id) {
     const c = await this.#readJson(this.#canonPath(id));
     if (!c) throw new Error(`Canonical not found: ${id}`);
