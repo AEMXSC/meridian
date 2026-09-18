@@ -77,6 +77,50 @@ test('a low-confidence language block is gated for review, not published', async
   assert.ok(!store.live.has('es_mx'), 'es_mx did not reach the edge');
 });
 
+test('a market with no layer + no compliance requirement stamps its real locale', async () => {
+  const canonical = {
+    id: 'canon/x',
+    title: 'x',
+    updated: NOW,
+    blocks: [{
+      id: 'hero', type: 'hero', content: { a: 1 }, hash: 'h1',
+    }],
+  };
+  const store = fakeStore();
+  const policies = [{ locale: 'zz', requiredLayers: [] }];
+  const plan = planPropagation(canonical, ['hero'], policies);
+  const opts = { layers: new Map(), policies, now: NOW };
+  const result = await applyPropagation(store, canonical, plan, opts);
+  assert.equal(result.applied.length, 1);
+  assert.equal(store.live.get('zz')?.locale, 'zz', 'variant keyed by real locale, not canonical id');
+});
+
+test('applyPropagation rejects a plan that does not match the canonical', async () => {
+  const { canonical, policies, layers } = await buildFixture();
+  const plan = planPropagation(canonical, ['hero'], policies);
+  const other = { ...canonical, id: 'canon/other' };
+  await assert.rejects(
+    () => applyPropagation(fakeStore(), other, plan, { layers, policies, now: NOW }),
+    /mismatch/,
+  );
+});
+
+test('a per-market write failure is isolated; snapshot and other markets survive', async () => {
+  const { canonical, policies, layers } = await buildFixture();
+  const store = fakeStore();
+  const realWrite = store.writeVariant;
+  store.writeVariant = async (v) => {
+    if (v.locale === 'en_us') throw new Error('boom');
+    return realWrite(v);
+  };
+  const plan = planPropagation(canonical, ['hero'], policies);
+  const result = await applyPropagation(store, canonical, plan, { layers, policies, now: NOW });
+  assert.ok(result.failed.some((f) => f.locale === 'en_us'), 'en_us recorded as failed');
+  assert.ok(!store.live.has('en_us'), 'failed market not on the edge');
+  assert.ok(result.applied.length >= 1, 'other clean markets still applied');
+  assert.ok('en_us' in result.snapshot, 'snapshot still captured for the failed market');
+});
+
 test('rollback restores prior /live and deletes variants that had none', async () => {
   const { canonical, policies, layers } = await buildFixture();
   const priorEnUs = {

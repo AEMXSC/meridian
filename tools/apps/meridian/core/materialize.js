@@ -26,9 +26,11 @@ const INSERT_ORIGIN = 'insert';
  * are never mutated.
  * @param {import('./schemas.js').CanonicalContentObject} canonical
  * @param {import('./schemas.js').AdaptationLayer|null} layer
+ * @param {string} [locale] - explicit locale; required when layer is null so the
+ *   variant is never stamped with a non-locale value
  * @returns {import('./schemas.js').DerivedVariant}
  */
-export function materialize(canonical, layer) {
+export function materialize(canonical, layer, locale) {
   // Seed from canonical, preserving canonical block order.
   const byId = new Map();
   const order = [];
@@ -83,7 +85,7 @@ export function materialize(canonical, layer) {
   });
 
   return {
-    locale: layer ? layer.locale : canonical.id,
+    locale: locale ?? layer?.locale ?? canonical.id,
     canonicalId: canonical.id,
     blocks: order.map((id) => byId.get(id)),
   };

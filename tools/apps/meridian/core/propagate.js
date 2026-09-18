@@ -74,6 +74,11 @@ export function planPropagation(canonical, changedBlockIds, policies) {
  * @returns {Promise<object>} { propagationId, applied[], gated[], snapshot }
  */
 export async function applyPropagation(store, canonical, plan, opts) {
+  // Bind the approved plan to the object actually being applied (PRD §9) — a
+  // stale plan against a refetched canonical must not silently apply.
+  if (plan.canonicalId !== canonical.id) {
+    throw new Error(`Plan/canonical mismatch: ${plan.canonicalId} vs ${canonical.id}`);
+  }
   const {
     layers, policies, scorer = createScorer(), threshold = AUTO_APPLY_THRESHOLD, now,
   } = opts;
@@ -82,39 +87,48 @@ export async function applyPropagation(store, canonical, plan, opts) {
   const propagationId = `${canonical.id}@${detectedAt}`;
   const applied = [];
   const gated = [];
+  const failed = [];
   const snapshot = {};
 
   await Promise.all(plan.affectedLocales.map(async (locale) => {
-    const layer = layers.get(locale) ?? null;
-    const variant = materialize(canonical, layer);
-    const decision = gate(
-      layer,
-      requiredByLocale.get(locale) ?? [],
-      plan.changedBlockIds,
-      scorer,
-      threshold,
-    );
-    // Snapshot before touching /live so rollback can restore (or delete) it.
-    snapshot[locale] = (await store.readVariant(locale, canonical.id)) ?? null;
+    try {
+      const layer = layers.get(locale) ?? null;
+      // Pass locale explicitly so a market with no layer still produces a
+      // variant stamped with its real locale, never the canonical id.
+      const variant = materialize(canonical, layer, locale);
+      const decision = gate(
+        layer,
+        requiredByLocale.get(locale) ?? [],
+        plan.changedBlockIds,
+        scorer,
+        threshold,
+      );
+      // Snapshot before touching /live so rollback can restore (or delete) it.
+      snapshot[locale] = (await store.readVariant(locale, canonical.id)) ?? null;
 
-    if (decision.gate === 'auto') {
-      await store.writeVariant(variant);
-      applied.push({ locale, blocks: variant.blocks.length });
-    } else {
-      await store.writeQueueItem({
-        propagationId,
-        locale,
-        canonicalId: canonical.id,
-        gate: decision.gate,
-        reason: decision.reason,
-        variant,
-        createdAt: detectedAt,
-      });
-      gated.push({ locale, gate: decision.gate, reason: decision.reason });
+      if (decision.gate === 'auto') {
+        await store.writeVariant(variant);
+        applied.push({ locale, blocks: variant.blocks.length });
+      } else {
+        await store.writeQueueItem({
+          propagationId,
+          locale,
+          canonicalId: canonical.id,
+          gate: decision.gate,
+          reason: decision.reason,
+          variant,
+          createdAt: detectedAt,
+        });
+        gated.push({ locale, gate: decision.gate, reason: decision.reason });
+      }
+    } catch (e) {
+      // Isolate per-locale failures so one bad market cannot abort the batch
+      // and strand already-written markets without a rollback snapshot.
+      failed.push({ locale, error: e.message });
     }
   }));
 
   return {
-    propagationId, applied, gated, snapshot,
+    propagationId, applied, gated, failed, snapshot,
   };
 }
