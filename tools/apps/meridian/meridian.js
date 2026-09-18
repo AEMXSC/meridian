@@ -55,6 +55,7 @@ class MeridianApp extends LitElement {
     _findings: { state: true },
     _error: { state: true },
     _diffs: { state: true },
+    _loadingDiffs: { state: true },
   };
 
   connectedCallback() {
@@ -65,6 +66,7 @@ class MeridianApp extends LitElement {
     this._site = this._site || '';
     this._findings = [];
     this._diffs = new Map();
+    this._loadingDiffs = new Set();
     this._error = '';
     if (this._org && this._site) this.scan();
   }
@@ -78,6 +80,11 @@ class MeridianApp extends LitElement {
       const config = await this._store.readConfig();
       if (!config) {
         this._error = `No /meridian/config.json found in ${this._org}/${this._site}.`;
+        this._state = 'init';
+        return;
+      }
+      if (!config.canonicalId || !Array.isArray(config.policies)) {
+        this._error = `Malformed /meridian/config.json in ${this._org}/${this._site} (needs canonicalId + policies[]).`;
         this._state = 'init';
         return;
       }
@@ -103,20 +110,35 @@ class MeridianApp extends LitElement {
 
   // Lazy-load the block diff for a drift/stale finding — "view only the changes".
   async toggleDiff(locale) {
-    const next = new Map(this._diffs);
-    if (next.has(locale)) {
+    if (this._diffs.has(locale)) {
+      const next = new Map(this._diffs);
       next.delete(locale);
       this._diffs = next;
       return;
     }
-    const [canonical, layer, stored] = await Promise.all([
-      this._store.readCanonical(this._canonicalId),
-      this._store.readLayer(locale, this._canonicalId),
-      this._store.readVariant(locale, this._canonicalId),
-    ]);
-    const expected = materialize(canonical, layer);
-    next.set(locale, onlyChanges(diffVariants(expected, stored)));
-    this._diffs = next;
+    if (this._loadingDiffs.has(locale)) return;
+    this._loadingDiffs = new Set(this._loadingDiffs).add(locale);
+    try {
+      const [canonical, layer, stored] = await Promise.all([
+        this._store.readCanonical(this._canonicalId),
+        this._store.readLayer(locale, this._canonicalId),
+        this._store.readVariant(locale, this._canonicalId),
+      ]);
+      const expected = materialize(canonical, layer);
+      // The stored /live variant may have been deleted since the scan; treat a
+      // missing variant as empty rather than throwing.
+      const actual = stored ?? { locale, canonicalId: this._canonicalId, blocks: [] };
+      const next = new Map(this._diffs);
+      next.set(locale, onlyChanges(diffVariants(expected, actual)));
+      this._diffs = next;
+    } catch (e) {
+      console.error(e);
+      this._error = `Could not load changes for ${locale}: ${e.message}`;
+    } finally {
+      const done = new Set(this._loadingDiffs);
+      done.delete(locale);
+      this._loadingDiffs = done;
+    }
   }
 
   get _byLocale() {
@@ -154,6 +176,11 @@ class MeridianApp extends LitElement {
     `;
   }
 
+  diffButtonLabel(locale) {
+    if (this._loadingDiffs.has(locale)) return 'Loading…';
+    return this._diffs.has(locale) ? 'Hide changes' : 'View changes';
+  }
+
   renderDiff(locale) {
     const changes = this._diffs.get(locale);
     if (!changes) return nothing;
@@ -181,8 +208,10 @@ class MeridianApp extends LitElement {
             ${icon(status.name, '0 0 20 20')}
           </span>
           <span class="mrd-locale">${locale}</span>
-          ${canDiff ? html`<sl-button class="mrd-diff-btn" @click=${() => this.toggleDiff(locale)}>
-            ${this._diffs.has(locale) ? 'Hide changes' : 'View changes'}
+          ${canDiff ? html`<sl-button class="mrd-diff-btn"
+            ?disabled=${this._loadingDiffs.has(locale)}
+            @click=${() => this.toggleDiff(locale)}>
+            ${this.diffButtonLabel(locale)}
           </sl-button>` : nothing}
         </div>
         ${findings.map((f) => html`

@@ -12,6 +12,7 @@ A collection of Adobe owned apps & plugins for Experience Workspace & Document A
 | **Fragment Picker** |https://main--aem-apps--adobe-rnd.aem.page/tools/plugins/fragments/fragments.html | `tools/plugins/fragments` | Browse and insert fragments with live preview  | Plugin |
 | **Developer** |https://main--aem-apps--adobe-rnd.aem.page/tools/plugins/developer/developer.html | `tools/plugins/developer` | Switch the preview branch (`?ref=`) for the current page  | Plugin |
 | **CUG** |https://main--aem-apps--adobe-rnd.aem.page/tools/plugins/cug/cug.html | `tools/plugins/cug` | Apply or remove closed user group (page access) restrictions  | Plugin |
+| **Meridian** |https://da.live/app/AEMXSC/meridian/tools/apps/meridian/meridian | `tools/apps/meridian` | Agentic localization & multi-market: canonical → typed adaptation layers → derived variants; read-only exposure queue  | App |
 
 ## Developing
 
