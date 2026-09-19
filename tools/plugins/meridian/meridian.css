@@ -1,0 +1,81 @@
+/*
+ * Copyright 2026 Adobe Systems Incorporated
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+:host {
+  display: block;
+  padding: 12px 14px;
+  font-family: var(--body-font-family, system-ui, sans-serif);
+  font-size: 13px;
+  color: #1d1d1d;
+}
+
+.mrd-msg {
+  color: #6e6e6e;
+}
+
+.mrd-msg.mrd-err {
+  color: #d31510;
+}
+
+.mrd-head {
+  display: flex;
+  gap: 12px;
+  font-weight: 700;
+  margin-bottom: 10px;
+}
+
+.mrd-count.mrd-critical { color: #d31510; }
+.mrd-count.mrd-warning { color: #b06f00; }
+
+.mrd-markets {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  max-height: 280px;
+  overflow: auto;
+}
+
+.mrd-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 3px 0;
+  border-top: 1px solid #f0f0f0;
+}
+
+.mrd-status svg {
+  width: 18px;
+  height: 18px;
+  display: block;
+}
+
+.mrd-locale {
+  font-weight: 700;
+  min-width: 56px;
+}
+
+.mrd-kinds {
+  color: #6e6e6e;
+  font-size: 12px;
+}
+
+.mrd-open {
+  display: inline-block;
+  margin-top: 12px;
+  color: #3b63fb;
+  text-decoration: none;
+  font-weight: 700;
+}
