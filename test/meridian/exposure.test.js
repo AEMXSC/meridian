@@ -17,6 +17,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import scanExposure from '../../tools/apps/meridian/core/exposure.js';
+import { materialize } from '../../tools/apps/meridian/core/materialize.js';
 import buildFixture from '../../tools/apps/meridian/seed/informatica.js';
 
 const NOW = '2026-09-08T00:00:00Z';
@@ -60,6 +61,47 @@ test('missing compliance is reported critical', async () => {
   const findings = scanExposure({ ...fixture, now: NOW });
   const compliance = findings.filter((f) => f.kind === 'missing-required');
   assert.ok(compliance.length > 0 && compliance.every((f) => f.severity === 'critical'));
+});
+
+test('a structurally forked block is not reported stale when canonical moves', () => {
+  const canonical = {
+    id: 'c',
+    title: 't',
+    updated: NOW,
+    blocks: [
+      {
+        id: 'hero', type: 'hero', content: { h: 'v2' }, hash: 'hash-hero-v2',
+      },
+      {
+        id: 'body', type: 'text', content: 'canonical body', hash: 'hash-body-v1',
+      },
+    ],
+  };
+  const layer = {
+    locale: 'ja_jp',
+    canonicalId: 'c',
+    entries: [{
+      blockId: 'hero',
+      layer: 'structural',
+      operation: 'fork',
+      value: { h: 'bespoke JP hero' },
+      reason: 'forked on purpose',
+      provenance: 'human',
+      confidence: null,
+      status: 'human-owned',
+    }],
+  };
+  // The stored variant is what materialize produces now: hero forked, body live.
+  const stored = materialize(canonical, layer);
+  const findings = scanExposure({
+    canonical,
+    policies: [{ locale: 'ja_jp', requiredLayers: [] }],
+    layers: new Map([['ja_jp', layer]]),
+    stored: new Map([['ja_jp', stored]]),
+    now: NOW,
+  });
+  assert.equal(findings.filter((f) => f.kind === 'stale').length, 0, 'forked block never stale');
+  assert.equal(findings.filter((f) => f.kind === 'drift').length, 0, 'and not drift either');
 });
 
 test('low-confidence: an auto-applied block below threshold is flagged', () => {

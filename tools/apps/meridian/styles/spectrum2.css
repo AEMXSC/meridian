@@ -1,0 +1,68 @@
+/*
+ * Copyright 2026 Adobe Systems Incorporated
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+/*
+ * Meridian Spectrum 2 token layer. DA's own sl component sheet
+ * (nx/public/sl/styles.css) already ships Spectrum 2 primitives (--s2-blue-*,
+ * --s2-gray-*, --s2-radius-*, --s2-border-radius, --sl-field-*). This sheet maps
+ * those primitives to Meridian's semantic names so every component reads one
+ * vocabulary. Every var carries a hardcoded fallback so the app still renders
+ * correctly if the sl sheet is not adopted (e.g. the plugin, or in isolation).
+ * Aligns Meridian visually with Adobe Brand Visibility (a Spectrum 2 surface).
+ */
+
+:host {
+  /* Surfaces — layered neutrals (Spectrum background/layer model). */
+  --mrd-bg: var(--s2-gray-50, #fff);
+  --mrd-surface: #fff;
+  --mrd-surface-sunken: var(--s2-gray-75, #f8f8f8);
+  --mrd-border: var(--s2-gray-300, #e1e1e1);
+  --mrd-border-strong: var(--s2-gray-400, #c9c9c9);
+
+  /* Text. */
+  --mrd-text: var(--s2-gray-800, #1d1d1d);
+  --mrd-text-muted: var(--s2-gray-600, #6e6e6e);
+
+  /* Accent (Spectrum blue) + semantic status colors. */
+  --mrd-accent: var(--s2-blue-800, #1473e6);
+  --mrd-accent-hover: var(--s2-blue-900, #0d66d0);
+  --mrd-critical: var(--s2-red-800, #d31510);
+  --mrd-warning: var(--s2-orange-800, #e68619);
+  --mrd-positive: var(--s2-green-800, #0ba45d);
+
+  /* Tints for status chips (soft Spectrum-style fills). */
+  --mrd-critical-tint: #ffe0dd;
+  --mrd-warning-tint: #fff0d5;
+  --mrd-positive-tint: #e4f6ec;
+  --mrd-accent-tint: #e6f0fd;
+
+  /* Corner radii — the signature Spectrum 2 rounding. */
+  --mrd-radius-card: var(--s2-radius-300, 16px);
+  --mrd-radius-control: var(--s2-radius-200, 8px);
+  --mrd-radius-pill: 999px;
+
+  /* Elevation. */
+  --mrd-shadow-card: 0 1px 4px rgb(0 0 0 / 8%);
+  --mrd-shadow-raised: 0 4px 12px rgb(0 0 0 / 12%);
+
+  /* Spacing scale (Spectrum 8px base). */
+  --mrd-space-100: 8px;
+  --mrd-space-200: 16px;
+  --mrd-space-300: 24px;
+
+  /* Adobe Clean — the Spectrum typeface, with a graceful system fallback. */
+  --mrd-font: 'adobe-clean', var(--body-font-family, 'Source Sans Pro', -apple-system, system-ui, sans-serif);
+}

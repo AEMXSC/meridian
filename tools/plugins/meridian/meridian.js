@@ -26,11 +26,13 @@ const APP_URL = 'https://da.live/app/AEMXSC/meridian/tools/apps/meridian/meridia
 const NX = 'https://da.live/nx';
 
 let nexter = null;
+let tokens = null;
 let styles = null;
 try {
   const { default: getStyle } = await import(`${NX}/utils/styles.js`);
-  [nexter, styles] = await Promise.all([
+  [nexter, tokens, styles] = await Promise.all([
     getStyle(`${NX}/styles/nexter.css`),
+    getStyle(new URL('../../apps/meridian/styles/spectrum2.css', import.meta.url).href),
     getStyle(import.meta.url),
   ]);
 } catch (e) {
@@ -47,7 +49,7 @@ class DaMeridian extends LitElement {
 
   connectedCallback() {
     super.connectedCallback();
-    this.shadowRoot.adoptedStyleSheets = [nexter, styles].filter(Boolean);
+    this.shadowRoot.adoptedStyleSheets = [nexter, tokens, styles].filter(Boolean);
     this._state = 'loading';
     this._findings = [];
     this._error = '';
@@ -93,6 +95,10 @@ class DaMeridian extends LitElement {
     return `${APP_URL}?org=${encodeURIComponent(org)}&site=${encodeURIComponent(site)}`;
   }
 
+  get _adaptLink() {
+    return `${this._appLink}&tab=adapt`;
+  }
+
   render() {
     if (this._state === 'loading') return html`<p class="mrd-msg">Scanning…</p>`;
     if (this._state === 'no-config') {
@@ -118,7 +124,10 @@ class DaMeridian extends LitElement {
           </div>`;
   })}
       </div>
-      <a class="mrd-open" href=${this._appLink} target="_blank" rel="noopener">Open in Meridian app ↗</a>
+      <div class="mrd-actions">
+        <a class="mrd-open" href=${this._appLink} target="_blank" rel="noopener">Open in Meridian app ↗</a>
+        <a class="mrd-open" href=${this._adaptLink} target="_blank" rel="noopener">Adapt this market ↗</a>
+      </div>
     `;
   }
 }

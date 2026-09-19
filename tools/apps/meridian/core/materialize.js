@@ -17,6 +17,7 @@
 import { LAYER_PRECEDENCE } from './schemas.js';
 
 const INSERT_ORIGIN = 'insert';
+const FORK_ORIGIN = 'fork';
 
 /**
  * Compute a derived variant from canonical blocks plus a locale's adaptation
@@ -76,6 +77,29 @@ export function materialize(canonical, layer, locale) {
       });
       return;
     }
+    if (entry.operation === 'fork') {
+      // Structural fork escape hatch (PRD §12.3): the market takes full custody
+      // of this block. Replace its content AND detach provenance so a later
+      // canonical change never marks it stale — the variant keeps subscribing to
+      // canonical on its *other* blocks. Only applies to an existing canonical
+      // block; a fork with no counterpart is ignored (nothing to detach from).
+      //
+      // A fork is structural by definition. Forking under any other layer
+      // (notably compliance) would exempt that block from the stale check while
+      // still counting as "layer present" — silently blinding compliance-drift
+      // detection (PRD §5). Reject that combination at the boundary, the same
+      // way an unknown layer type throws above.
+      if (entry.layer !== 'structural') {
+        throw new Error(`Fork requires the structural layer, got "${entry.layer}" on block ${entry.blockId}`);
+      }
+      if (!canonicalBlock) return;
+      byId.set(entry.blockId, {
+        ...byId.get(entry.blockId),
+        content: entry.value,
+        derivedFrom: `${FORK_ORIGIN}:${entry.blockId}`,
+      });
+      return;
+    }
     // translate / override (and insert onto an existing canonical block):
     // replace content, keep derivedFrom pointed at the canonical hash so
     // staleness stays detectable. An entry targeting a nonexistent canonical
@@ -89,6 +113,17 @@ export function materialize(canonical, layer, locale) {
     canonicalId: canonical.id,
     blocks: order.map((id) => byId.get(id)),
   };
+}
+
+/**
+ * A derived block whose provenance is a structural fork has intentionally
+ * detached from canonical (PRD §12.3), so staleness must never be reported for
+ * it. Exposure uses this to exempt forked blocks from the stale check.
+ * @param {string} [derivedFrom]
+ * @returns {boolean}
+ */
+export function isForked(derivedFrom) {
+  return typeof derivedFrom === 'string' && derivedFrom.startsWith(`${FORK_ORIGIN}:`);
 }
 
 /**

@@ -14,7 +14,7 @@
  * limitations under the License.
  */
 
-import { materialize } from './materialize.js';
+import { materialize, isForked } from './materialize.js';
 import { stableStringify } from './hash.js';
 
 const DEFAULT_CONFIDENCE_THRESHOLD = 0.85;
@@ -101,8 +101,11 @@ export default function scanExposure(input) {
     if (!storedVariant) return;
 
     // stale: a stored block was derived from an older canonical hash — it did
-    // not recompute after canonical moved.
+    // not recompute after canonical moved. A structurally forked block is
+    // exempt: it took full custody on purpose (PRD §12.3), so divergence from
+    // canonical is intended, not staleness.
     const staleBlocks = storedVariant.blocks.filter((b) => {
+      if (isForked(b.derivedFrom)) return false;
       const currentHash = canonicalHash.get(b.id);
       return currentHash && b.derivedFrom !== currentHash;
     });

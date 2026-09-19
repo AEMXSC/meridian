@@ -16,7 +16,7 @@
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { materialize, serializeVariant } from '../../tools/apps/meridian/core/materialize.js';
+import { materialize, serializeVariant, isForked } from '../../tools/apps/meridian/core/materialize.js';
 import { hashBlockContent } from '../../tools/apps/meridian/core/hash.js';
 import buildFixture from '../../tools/apps/meridian/seed/informatica.js';
 
@@ -159,6 +159,51 @@ test('unknown adaptation layer throws rather than mis-sorting', async () => {
     }],
   };
   assert.throws(() => materialize(canon, layer), /Unknown adaptation layer/);
+});
+
+test('fork replaces a block and detaches its provenance from canonical', async () => {
+  const canon = await fixtureCanon();
+  const layer = {
+    locale: 'ja_jp',
+    canonicalId: canon.id,
+    entries: [{
+      blockId: 'hero',
+      layer: 'structural',
+      operation: 'fork',
+      value: { heading: 'Fully custom JP hero' },
+      reason: 'Market runs a bespoke hero',
+      provenance: 'human',
+      confidence: null,
+      status: 'human-owned',
+    }],
+  };
+  const derived = materialize(canon, layer);
+  const hero = derived.blocks.find((b) => b.id === 'hero');
+  const price = derived.blocks.find((b) => b.id === 'price');
+  assert.deepEqual(hero.content, { heading: 'Fully custom JP hero' });
+  assert.ok(isForked(hero.derivedFrom), 'forked block is flagged as forked');
+  assert.notEqual(hero.derivedFrom, canon.blocks[0].hash, 'no longer tracks canonical hash');
+  // The unforked block still subscribes to canonical (PRD §12.3).
+  assert.equal(price.derivedFrom, canon.blocks[1].hash);
+});
+
+test('fork on a non-structural layer throws (keeps compliance-drift detectable)', async () => {
+  const canon = await fixtureCanon();
+  const layer = {
+    locale: 'de_de',
+    canonicalId: canon.id,
+    entries: [{
+      blockId: 'price',
+      layer: 'compliance',
+      operation: 'fork',
+      value: { amount: 'custom' },
+      reason: 'r',
+      provenance: 'human',
+      confidence: null,
+      status: 'human-owned-nonnegotiable',
+    }],
+  };
+  assert.throws(() => materialize(canon, layer), /Fork requires the structural layer/);
 });
 
 test('insert appends a market-specific block after canonical blocks', async () => {

@@ -14,55 +14,89 @@
  * limitations under the License.
  */
 
+/* Spectrum 2 tokens are provided by ./styles/spectrum2.css (adopted alongside). */
+
 :host {
   display: block;
-  padding: 16px 24px;
-  font-family: var(--body-font-family, system-ui, sans-serif);
-  color: #1d1d1d;
+  padding: var(--mrd-space-200) var(--mrd-space-300);
+  background: var(--mrd-bg);
+  font-family: var(--mrd-font);
+  color: var(--mrd-text);
+  font-size: 14px;
+  line-height: 1.4;
 }
 
+/* ---- Toolbar --------------------------------------------------------- */
 .mrd-toolbar {
   display: flex;
   align-items: center;
-  gap: 16px;
+  gap: var(--mrd-space-200);
   flex-wrap: wrap;
 }
 
 .mrd-toolbar h1 {
-  font-size: 20px;
+  font-size: 22px;
+  font-weight: 700;
+  letter-spacing: -0.01em;
   margin: 0;
 }
 
 .mrd-form {
   display: flex;
-  gap: 8px;
+  gap: var(--mrd-space-100);
   align-items: center;
 }
 
 .nx-alert.warning {
-  margin: 12px 0;
-  padding: 8px 12px;
-  border-radius: 6px;
-  background: #fff4d5;
+  margin: var(--mrd-space-200) 0;
+  padding: 10px 14px;
+  border-radius: var(--mrd-radius-control);
+  background: var(--mrd-warning-tint);
   color: #674d00;
+  border: 1px solid var(--mrd-warning);
 }
 
 .mrd-loading,
 .mrd-empty {
-  padding: 24px 0;
-  color: #6e6e6e;
+  padding: var(--mrd-space-300) 0;
+  color: var(--mrd-text-muted);
 }
 
+/* ---- Scorecards (Brand-Visibility-style summary) --------------------- */
 .mrd-summary {
   display: flex;
-  gap: 16px;
-  margin: 16px 0 8px;
-  font-weight: 700;
+  gap: var(--mrd-space-200);
+  margin: var(--mrd-space-200) 0;
 }
 
-.mrd-summary .mrd-critical { color: #d31510; }
-.mrd-summary .mrd-warning { color: #e68619; }
+.mrd-scorecard {
+  flex: 0 0 auto;
+  min-width: 116px;
+  padding: 12px 18px;
+  background: var(--mrd-surface);
+  border: 1px solid var(--mrd-border);
+  border-radius: var(--mrd-radius-card);
+  box-shadow: var(--mrd-shadow-card);
+}
 
+.mrd-scorecard .mrd-score {
+  font-size: 28px;
+  font-weight: 700;
+  line-height: 1.1;
+}
+
+.mrd-scorecard .mrd-score-label {
+  font-size: 12px;
+  color: var(--mrd-text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.mrd-scorecard.mrd-critical .mrd-score { color: var(--mrd-critical); }
+.mrd-scorecard.mrd-warning .mrd-score { color: var(--mrd-warning); }
+.mrd-scorecard.mrd-positive .mrd-score { color: var(--mrd-positive); }
+
+/* ---- Cards / market rows -------------------------------------------- */
 .mrd-list {
   display: flex;
   flex-direction: column;
@@ -70,16 +104,18 @@
 }
 
 .mrd-market {
-  border: 1px solid #e1e1e1;
-  border-radius: 8px;
-  padding: 12px 16px;
+  background: var(--mrd-surface);
+  border: 1px solid var(--mrd-border);
+  border-radius: var(--mrd-radius-card);
+  padding: 14px 18px;
+  box-shadow: var(--mrd-shadow-card);
 }
 
 .mrd-market-head {
   display: flex;
   align-items: center;
   gap: 10px;
-  margin-bottom: 8px;
+  margin-bottom: var(--mrd-space-100);
 }
 
 .mrd-market-head .mrd-status svg {
@@ -100,8 +136,8 @@
   display: flex;
   gap: 10px;
   align-items: baseline;
-  padding: 4px 0;
-  border-top: 1px solid #f0f0f0;
+  padding: 6px 0;
+  border-top: 1px solid var(--mrd-surface-sunken);
 }
 
 .mrd-kind {
@@ -110,18 +146,19 @@
   font-weight: 700;
   text-transform: uppercase;
   letter-spacing: 0.04em;
-  padding: 1px 8px;
-  border-radius: 10px;
-  background: #f0f0f0;
+  padding: 2px 10px;
+  border-radius: var(--mrd-radius-pill);
+  background: var(--mrd-surface-sunken);
+  color: var(--mrd-text-muted);
 }
 
 .mrd-finding.mrd-critical .mrd-kind {
-  background: #ffe0dd;
-  color: #d31510;
+  background: var(--mrd-critical-tint);
+  color: var(--mrd-critical);
 }
 
 .mrd-finding.mrd-warning .mrd-kind {
-  background: #fff0d5;
+  background: var(--mrd-warning-tint);
   color: #b06f00;
 }
 
@@ -130,19 +167,20 @@
   font-size: 14px;
 }
 
+/* ---- Diff ------------------------------------------------------------ */
 .mrd-diff {
   margin-top: 10px;
-  border-top: 1px dashed #d1d1d1;
-  padding-top: 8px;
+  border-top: 1px dashed var(--mrd-border);
+  padding-top: var(--mrd-space-100);
 }
 
 .mrd-diff-row {
-  margin-bottom: 8px;
+  margin-bottom: var(--mrd-space-100);
 }
 
 .mrd-diff-block {
   font-weight: 700;
-  margin-right: 8px;
+  margin-right: var(--mrd-space-100);
 }
 
 .mrd-diff-status {
@@ -150,76 +188,244 @@
   text-transform: uppercase;
 }
 
-.mrd-diff-status.mrd-changed { color: #e68619; }
-.mrd-diff-status.mrd-added { color: #0ba45d; }
-.mrd-diff-status.mrd-removed { color: #d31510; }
+.mrd-diff-status.mrd-changed { color: var(--mrd-warning); }
+.mrd-diff-status.mrd-added { color: var(--mrd-positive); }
+.mrd-diff-status.mrd-removed { color: var(--mrd-critical); }
 
 .mrd-diff-cols {
   display: grid;
   grid-template-columns: 1fr 1fr;
-  gap: 8px;
+  gap: var(--mrd-space-100);
   margin-top: 4px;
 }
 
 .mrd-diff-cols pre {
   margin: 0;
-  padding: 8px;
-  border-radius: 6px;
+  padding: var(--mrd-space-100);
+  border-radius: var(--mrd-radius-control);
   font-size: 12px;
   overflow: auto;
   white-space: pre-wrap;
 }
 
-.mrd-expected { background: #eaf6ee; }
-.mrd-actual { background: #fdeceb; }
+.mrd-expected { background: var(--mrd-positive-tint); }
+.mrd-actual { background: var(--mrd-critical-tint); }
 
+/* ---- Tabs ------------------------------------------------------------ */
 .mrd-tabs {
   display: flex;
   gap: 4px;
-  margin: 16px 0 8px;
-  border-bottom: 1px solid #e1e1e1;
+  margin: var(--mrd-space-200) 0 var(--mrd-space-100);
+  border-bottom: 1px solid var(--mrd-border);
 }
 
 .mrd-tab {
   background: none;
   border: none;
   border-bottom: 2px solid transparent;
-  padding: 8px 14px;
+  padding: 10px 16px;
   font: inherit;
-  color: #6e6e6e;
+  color: var(--mrd-text-muted);
   cursor: pointer;
+  border-radius: var(--mrd-radius-control) var(--mrd-radius-control) 0 0;
 }
 
+.mrd-tab:hover { background: var(--mrd-surface-sunken); }
+
 .mrd-tab.active {
-  color: #1d1d1d;
+  color: var(--mrd-text);
   font-weight: 700;
-  border-bottom-color: #1473e6;
+  border-bottom-color: var(--mrd-accent);
 }
 
 .mrd-badge {
   display: inline-block;
   min-width: 18px;
   padding: 0 6px;
-  border-radius: 10px;
-  background: #e68619;
+  border-radius: var(--mrd-radius-pill);
+  background: var(--mrd-warning);
   color: #fff;
   font-size: 12px;
   text-align: center;
 }
 
+/* ---- Taste-queue actions -------------------------------------------- */
 .mrd-queue-actions {
   margin-left: auto;
   display: flex;
-  gap: 8px;
+  gap: var(--mrd-space-100);
 }
 
 .mrd-reject-form {
   display: flex;
-  gap: 8px;
+  gap: var(--mrd-space-100);
   align-items: center;
-  margin-top: 8px;
+  margin-top: var(--mrd-space-100);
 }
 
 .mrd-reject-input {
   flex: 1;
+}
+
+/* ---- Adaptations (Phase 3 authoring) -------------------------------- */
+.mrd-adapt-intro {
+  margin: 4px 0 var(--mrd-space-200);
+  color: var(--mrd-text-muted);
+}
+
+.mrd-nonpublishable {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 10px;
+  padding: 8px 12px;
+  border-radius: var(--mrd-radius-control);
+  background: var(--mrd-critical-tint);
+  color: var(--mrd-critical);
+  font-weight: 700;
+  font-size: 13px;
+}
+
+.mrd-layer-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-left: auto;
+}
+
+.mrd-layer-chip {
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  padding: 2px 10px;
+  border-radius: var(--mrd-radius-pill);
+  background: var(--mrd-surface-sunken);
+  color: var(--mrd-text-muted);
+}
+
+.mrd-layer-chip.mrd-layer-language {
+  background: var(--mrd-accent-tint);
+  color: var(--mrd-accent-hover);
+}
+
+.mrd-layer-chip.mrd-layer-creative {
+  background: #f0e9fb;
+  color: #6b3fc9;
+}
+
+.mrd-layer-chip.mrd-layer-commercial {
+  background: var(--mrd-positive-tint);
+  color: #0a7c46;
+}
+
+.mrd-layer-chip.mrd-layer-compliance {
+  background: var(--mrd-critical-tint);
+  color: var(--mrd-critical);
+}
+
+.mrd-layer-chip.mrd-layer-structural {
+  background: #e9edf2;
+  color: #445;
+}
+
+.mrd-entry {
+  border-top: 1px solid var(--mrd-surface-sunken);
+  padding: 10px 0;
+}
+
+.mrd-entry-head {
+  display: flex;
+  align-items: center;
+  gap: var(--mrd-space-100);
+}
+
+.mrd-entry-block {
+  font-weight: 700;
+  font-family: ui-monospace, monospace;
+  font-size: 13px;
+}
+
+.mrd-entry-op {
+  font-size: 12px;
+  color: var(--mrd-text-muted);
+}
+
+.mrd-entry-actions {
+  margin-left: auto;
+  display: flex;
+  gap: 6px;
+}
+
+.mrd-entry-reason {
+  margin-top: 4px;
+  font-size: 13px;
+  color: #4b4b4b;
+}
+
+.mrd-entry-meta {
+  margin-top: 2px;
+  font-size: 12px;
+  color: var(--mrd-text-muted);
+}
+
+.mrd-lock {
+  color: var(--mrd-critical);
+  font-weight: 700;
+}
+
+.mrd-entry-form {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: var(--mrd-space-100);
+  margin-top: 10px;
+  padding: 12px;
+  background: var(--mrd-surface-sunken);
+  border-radius: var(--mrd-radius-control);
+}
+
+.mrd-entry-form .mrd-field-wide { grid-column: 1 / -1; }
+
+.mrd-entry-form label {
+  display: block;
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--mrd-text-muted);
+  margin-bottom: 4px;
+}
+
+.mrd-entry-form textarea,
+.mrd-entry-form select {
+  width: 100%;
+  box-sizing: border-box;
+  font: inherit;
+  font-size: 13px;
+  padding: 8px 10px;
+  border: var(--sl-field-border, 2px solid var(--mrd-border));
+  border-radius: var(--mrd-radius-control);
+  background: var(--mrd-surface);
+  color: var(--mrd-text);
+}
+
+.mrd-entry-form textarea {
+  min-height: 72px;
+  font-family: ui-monospace, monospace;
+  resize: vertical;
+}
+
+.mrd-suggest {
+  grid-column: 1 / -1;
+  font-size: 12px;
+  color: var(--mrd-accent-hover);
+}
+
+.mrd-form-actions {
+  grid-column: 1 / -1;
+  display: flex;
+  gap: var(--mrd-space-100);
+  justify-content: flex-end;
+}
+
+.mrd-add-entry {
+  margin-top: 10px;
 }

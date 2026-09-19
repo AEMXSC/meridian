@@ -14,31 +14,48 @@
  * limitations under the License.
  */
 
+/* Spectrum 2 tokens come from ../../apps/meridian/styles/spectrum2.css (adopted). */
+
 :host {
   display: block;
   padding: 12px 14px;
-  font-family: var(--body-font-family, system-ui, sans-serif);
+  font-family: var(--mrd-font);
   font-size: 13px;
-  color: #1d1d1d;
+  color: var(--mrd-text);
 }
 
 .mrd-msg {
-  color: #6e6e6e;
+  color: var(--mrd-text-muted);
 }
 
 .mrd-msg.mrd-err {
-  color: #d31510;
+  color: var(--mrd-critical);
 }
 
 .mrd-head {
   display: flex;
-  gap: 12px;
-  font-weight: 700;
+  gap: 8px;
   margin-bottom: 10px;
 }
 
-.mrd-count.mrd-critical { color: #d31510; }
-.mrd-count.mrd-warning { color: #b06f00; }
+.mrd-count {
+  padding: 2px 10px;
+  border-radius: var(--mrd-radius-pill);
+  font-weight: 700;
+  font-size: 12px;
+  background: var(--mrd-surface-sunken);
+  color: var(--mrd-text-muted);
+}
+
+.mrd-count.mrd-critical {
+  background: var(--mrd-critical-tint);
+  color: var(--mrd-critical);
+}
+
+.mrd-count.mrd-warning {
+  background: var(--mrd-warning-tint);
+  color: #b06f00;
+}
 
 .mrd-markets {
   display: flex;
@@ -52,8 +69,8 @@
   display: flex;
   align-items: center;
   gap: 8px;
-  padding: 3px 0;
-  border-top: 1px solid #f0f0f0;
+  padding: 5px 0;
+  border-top: 1px solid var(--mrd-surface-sunken);
 }
 
 .mrd-status svg {
@@ -68,14 +85,24 @@
 }
 
 .mrd-kinds {
-  color: #6e6e6e;
+  color: var(--mrd-text-muted);
   font-size: 12px;
+}
+
+.mrd-actions {
+  display: flex;
+  gap: 16px;
+  margin-top: 14px;
 }
 
 .mrd-open {
   display: inline-block;
-  margin-top: 12px;
-  color: #3b63fb;
+  color: var(--mrd-accent);
   text-decoration: none;
   font-weight: 700;
+}
+
+.mrd-open:hover {
+  color: var(--mrd-accent-hover);
+  text-decoration: underline;
 }

@@ -21,18 +21,24 @@ import scanCanonical from './core/scan.js';
 import variantStatus from './core/variant-status.js';
 import { diffVariants, onlyChanges } from './core/diff.js';
 import { materialize } from './core/materialize.js';
+import createClassifier from './core/classify.js';
+import { LAYER_PRECEDENCE } from './core/schemas.js';
 import { icon } from '../msm/core/icons.js';
 import 'https://da.live/nx/public/sl/components.js';
 
 const NX = 'https://da.live/nx';
 const SEVERITY_RANK = { critical: 0, warning: 1, info: 2 };
+const OPERATIONS = ['translate', 'override', 'insert', 'fork'];
+const classify = createClassifier();
 
 let sl = null;
+let tokens = null;
 let styles = null;
 try {
   const { default: getStyle } = await import(`${NX}/utils/styles.js`);
-  [sl, styles] = await Promise.all([
+  [sl, tokens, styles] = await Promise.all([
     getStyle(`${NX}/public/sl/styles.css`),
+    getStyle(new URL('./styles/spectrum2.css', import.meta.url).href),
     getStyle(import.meta.url),
   ]);
 } catch (e) {
@@ -41,9 +47,24 @@ try {
 
 // Deep-link org/site so an author arriving from the editor plugin never
 // re-enters context (the annoyance called out in the Experience Workspace demo).
+const TABS = ['exposure', 'taste', 'adapt'];
+
 function parseDeepLink() {
   const params = new URLSearchParams(window.location.search);
-  return { org: (params.get('org') || '').trim(), site: (params.get('site') || '').trim() };
+  const tab = (params.get('tab') || '').trim();
+  return {
+    org: (params.get('org') || '').trim(),
+    site: (params.get('site') || '').trim(),
+    tab: TABS.includes(tab) ? tab : 'exposure',
+  };
+}
+
+// Render an adaptation entry's value for the editor textarea: objects as pretty
+// JSON, strings verbatim, absent as empty.
+function entryValueString(value) {
+  if (value === undefined || value === null) return '';
+  if (typeof value === 'string') return value;
+  return JSON.stringify(value, null, 2);
 }
 
 class MeridianApp extends LitElement {
@@ -60,11 +81,16 @@ class MeridianApp extends LitElement {
     _queue: { state: true },
     _queueBusy: { state: true },
     _rejectingKey: { state: true },
+    _layers: { state: true },
+    _editing: { state: true },
+    _adaptBusy: { state: true },
+    _suggest: { state: true },
+    _confirmKey: { state: true },
   };
 
   connectedCallback() {
     super.connectedCallback();
-    this.shadowRoot.adoptedStyleSheets = [sl, styles].filter(Boolean);
+    this.shadowRoot.adoptedStyleSheets = [sl, tokens, styles].filter(Boolean);
     this._state = 'init';
     this._org = this._org || '';
     this._site = this._site || '';
@@ -72,10 +98,15 @@ class MeridianApp extends LitElement {
     this._diffs = new Map();
     this._loadingDiffs = new Set();
     this._error = '';
-    this._tab = 'exposure';
+    this._tab = parseDeepLink().tab;
     this._queue = [];
     this._queueBusy = new Set();
     this._rejectingKey = '';
+    this._layers = new Map();
+    this._editing = null;
+    this._adaptBusy = new Set();
+    this._suggest = '';
+    this._confirmKey = '';
     if (this._org && this._site) this.scan();
   }
 
@@ -97,9 +128,11 @@ class MeridianApp extends LitElement {
         return;
       }
       this._canonicalId = config.canonicalId;
+      this._policies = config.policies;
       this._findings = await scanCanonical(this._store, config.canonicalId, config.policies);
       this._state = 'ready';
       this.loadQueue();
+      this.loadAdaptations();
     } catch (e) {
       console.error(e);
       this._error = e.message || 'Scan failed.';
@@ -190,6 +223,177 @@ class MeridianApp extends LitElement {
     }
   }
 
+  // ---- Adaptations (Phase 3 authoring) --------------------------------
+  async loadAdaptations() {
+    try {
+      this._canonical = await this._store.readCanonical(this._canonicalId);
+      const pairs = await Promise.all(this._policies.map(
+        async (p) => [p.locale, await this._store.readLayer(p.locale, this._canonicalId)],
+      ));
+      this._layers = new Map(pairs.filter(([, layer]) => layer));
+    } catch (e) {
+      console.error('Failed to load adaptations', e);
+      this._error = `Could not load adaptations: ${e.message}`;
+    }
+  }
+
+  // A market that requires a compliance layer but has none authored is
+  // non-publishable (PRD §5) — the same gate propagation enforces, surfaced
+  // here so the author sees it while editing.
+  isNonPublishable(locale) {
+    const policy = this._policies?.find((p) => p.locale === locale);
+    if (!policy?.requiredLayers?.includes('compliance')) return false;
+    const layer = this._layers.get(locale);
+    const present = new Set((layer?.entries ?? []).map((e) => e.layer));
+    return !present.has('compliance');
+  }
+
+  startAdd(locale) {
+    this._suggest = '';
+    this._editing = { locale, index: null };
+  }
+
+  startEdit(locale, index) {
+    this._suggest = '';
+    this._editing = { locale, index };
+  }
+
+  // Prefill a structural-fork entry from the block's current canonical content
+  // so the author edits a real starting point (PRD §12.3). If the block already
+  // has an entry, convert it in place (reuse its index) rather than appending a
+  // second entry for the same block — a fork supersedes the prior adaptation.
+  startFork(locale, blockId) {
+    const block = this._canonical?.blocks.find((b) => b.id === blockId);
+    const layer = this._layers.get(locale);
+    const index = layer ? layer.entries.findIndex((e) => e.blockId === blockId) : -1;
+    this._suggest = '';
+    this._editing = {
+      locale,
+      index: index >= 0 ? index : null,
+      prefill: {
+        blockId, layer: 'structural', operation: 'fork', value: block?.content, reason: '',
+      },
+    };
+  }
+
+  cancelEdit() {
+    this._editing = null;
+    this._suggest = '';
+  }
+
+  // Adaptation Agent: suggest a layer type for the selected block and pre-select
+  // it. Only a suggestion — the author confirms (PRD §11 keeps humans in charge
+  // of commercial/compliance).
+  suggestLayer() {
+    const blockId = this.shadowRoot.querySelector('#af-block')?.value;
+    const block = this._canonical?.blocks.find((b) => b.id === blockId);
+    if (!block) {
+      this._suggest = 'Select an existing canonical block to get a suggestion.';
+      return;
+    }
+    const s = classify(block);
+    const layerSel = this.shadowRoot.querySelector('#af-layer');
+    if (layerSel) layerSel.value = s.layer;
+    this._suggest = `Suggested: ${s.layer} — ${s.reason}`;
+  }
+
+  async saveEntry(locale) {
+    const root = this.shadowRoot;
+    const blockId = root.querySelector('#af-block')?.value;
+    const layer = root.querySelector('#af-layer')?.value;
+    const operation = root.querySelector('#af-op')?.value;
+    const rawValue = root.querySelector('#af-value')?.value ?? '';
+    const reason = root.querySelector('#af-reason')?.value.trim();
+    if (!blockId || !reason) {
+      this._error = 'Block and reason are required to save an adaptation.';
+      return;
+    }
+    let value;
+    try {
+      value = JSON.parse(rawValue);
+    } catch {
+      value = rawValue;
+    }
+    // A fork is structural by definition; never let it be saved under another
+    // layer (esp. compliance), which would blind staleness detection. The
+    // materialize boundary also enforces this — this keeps the UI from ever
+    // producing the invalid combination.
+    const effectiveLayer = operation === 'fork' ? 'structural' : layer;
+    const entry = {
+      blockId,
+      layer: effectiveLayer,
+      operation,
+      value,
+      reason,
+      // Authored in the UI by a person — provenance is the signed-in user, and a
+      // compliance entry is marked non-negotiable and never scored (PRD §5/§11).
+      provenance: this.context?.user?.email || 'human',
+      confidence: null,
+      status: effectiveLayer === 'compliance' ? 'human-owned-nonnegotiable' : 'human-owned',
+    };
+    const index = Number.isInteger(this._editing?.index) ? this._editing.index : null;
+    await this.writeEntry(locale, entry, index);
+  }
+
+  async writeEntry(locale, entry, index) {
+    if (this._adaptBusy.has(locale)) return;
+    this._adaptBusy = new Set(this._adaptBusy).add(locale);
+    try {
+      const existing = this._layers.get(locale)
+        ?? { locale, canonicalId: this._canonicalId, entries: [] };
+      const entries = [...existing.entries];
+      if (index === null) entries.push(entry);
+      else entries[index] = entry;
+      await this._store.writeLayer({
+        ...existing, locale, canonicalId: this._canonicalId, entries,
+      });
+      this._editing = null;
+      this._suggest = '';
+      await this.refreshAfterAuthoring();
+    } catch (e) {
+      this._error = `Save failed for ${locale}: ${e.message}`;
+    } finally {
+      const done = new Set(this._adaptBusy);
+      done.delete(locale);
+      this._adaptBusy = done;
+    }
+  }
+
+  async deleteEntry(locale, index) {
+    if (this._adaptBusy.has(locale)) return;
+    this._confirmKey = '';
+    this._adaptBusy = new Set(this._adaptBusy).add(locale);
+    try {
+      const existing = this._layers.get(locale);
+      if (existing) {
+        const entries = existing.entries.filter((_, i) => i !== index);
+        await this._store.writeLayer({ ...existing, entries });
+        await this.refreshAfterAuthoring();
+      }
+    } catch (e) {
+      this._error = `Delete failed for ${locale}: ${e.message}`;
+    } finally {
+      const done = new Set(this._adaptBusy);
+      done.delete(locale);
+      this._adaptBusy = done;
+    }
+  }
+
+  // Re-read layers and re-run the exposure scan so authoring changes are
+  // reflected immediately, without the full-page loading reset scan() does.
+  // Never throws: the layer write already succeeded by the time this runs, so a
+  // transient rescan failure must not be reported as a save failure (which would
+  // invite a duplicate re-submit).
+  async refreshAfterAuthoring() {
+    await this.loadAdaptations();
+    try {
+      this._findings = await scanCanonical(this._store, this._canonicalId, this._policies);
+    } catch (e) {
+      console.error('Rescan after authoring failed', e);
+      this._error = `Saved, but could not refresh findings: ${e.message}`;
+    }
+  }
+
   handleSubmit(e) {
     e.preventDefault();
     const org = this.shadowRoot.querySelector('#org-input')?.value.trim();
@@ -254,6 +458,12 @@ class MeridianApp extends LitElement {
     }, {});
   }
 
+  get _cleanCount() {
+    if (!this._policies) return 0;
+    const affected = new Set(this._findings.map((f) => f.locale));
+    return this._policies.filter((p) => !affected.has(p.locale)).length;
+  }
+
   renderToolbar() {
     return html`
       <div class="mrd-toolbar">
@@ -270,6 +480,8 @@ class MeridianApp extends LitElement {
             @click=${() => { this._tab = 'exposure'; }}>Exposure queue</button>
           <button class="mrd-tab ${this._tab === 'taste' ? 'active' : ''}"
             @click=${() => { this._tab = 'taste'; }}>Taste queue${this._queue.length ? html` <span class="mrd-badge">${this._queue.length}</span>` : nothing}</button>
+          <button class="mrd-tab ${this._tab === 'adapt' ? 'active' : ''}"
+            @click=${() => { this._tab = 'adapt'; }}>Adaptations</button>
         </div>` : nothing}
       ${this._error ? html`<div class="nx-alert warning">${this._error}</div>` : nothing}
     `;
@@ -327,8 +539,18 @@ class MeridianApp extends LitElement {
     const s = this._summary;
     return html`
       <div class="mrd-summary">
-        <span class="mrd-critical">${s.critical ?? 0} critical</span>
-        <span class="mrd-warning">${s.warning ?? 0} warning</span>
+        <div class="mrd-scorecard mrd-critical">
+          <div class="mrd-score">${s.critical ?? 0}</div>
+          <div class="mrd-score-label">Critical</div>
+        </div>
+        <div class="mrd-scorecard mrd-warning">
+          <div class="mrd-score">${s.warning ?? 0}</div>
+          <div class="mrd-score-label">Warning</div>
+        </div>
+        <div class="mrd-scorecard mrd-positive">
+          <div class="mrd-score">${this._cleanCount}</div>
+          <div class="mrd-score-label">Clean markets</div>
+        </div>
       </div>
       <div class="mrd-list">${this._byLocale.map((g) => this.renderMarket(g))}</div>
     `;
@@ -367,10 +589,138 @@ class MeridianApp extends LitElement {
     return html`<div class="mrd-list">${this._queue.map((i) => this.renderQueueItem(i))}</div>`;
   }
 
+  // Deleting a non-negotiable (compliance) entry takes a confirm step so legal
+  // content is not removed by a single stray click. Inline, not window.confirm
+  // (which a sandboxed app iframe can silently suppress).
+  renderDelete(locale, i, locked, busy) {
+    const key = `${locale}:${i}`;
+    if (locked && this._confirmKey === key) {
+      return html`
+        <sl-button ?disabled=${busy} @click=${() => this.deleteEntry(locale, i)}>Confirm delete</sl-button>
+        <sl-button ?disabled=${busy} @click=${() => { this._confirmKey = ''; }}>Cancel</sl-button>`;
+    }
+    if (locked) {
+      return html`<sl-button ?disabled=${busy} @click=${() => { this._confirmKey = key; }}>Delete</sl-button>`;
+    }
+    return html`<sl-button ?disabled=${busy} @click=${() => this.deleteEntry(locale, i)}>Delete</sl-button>`;
+  }
+
+  renderEntry(locale, entry, i) {
+    const locked = entry.status === 'human-owned-nonnegotiable';
+    const busy = this._adaptBusy.has(locale);
+    return html`
+      <div class="mrd-entry">
+        <div class="mrd-entry-head">
+          <span class="mrd-entry-block">${entry.blockId}</span>
+          <span class="mrd-layer-chip mrd-layer-${entry.layer}">${entry.layer}</span>
+          <span class="mrd-entry-op">${entry.operation}</span>
+          ${locked ? html`<span class="mrd-lock" title="Human-owned, non-negotiable">human-only</span>` : nothing}
+          <span class="mrd-entry-actions">
+            <sl-button ?disabled=${busy} @click=${() => this.startEdit(locale, i)}>Edit</sl-button>
+            ${entry.operation === 'fork' ? nothing : html`<sl-button ?disabled=${busy} @click=${() => this.startFork(locale, entry.blockId)}>Fork</sl-button>`}
+            ${this.renderDelete(locale, i, locked, busy)}
+          </span>
+        </div>
+        <div class="mrd-entry-reason">${entry.reason}</div>
+        <div class="mrd-entry-meta">${entry.provenance}${entry.confidence != null ? ` · confidence ${entry.confidence}` : ''}</div>
+      </div>`;
+  }
+
+  renderEntryForm(locale) {
+    const editing = this._editing;
+    const layer = this._layers.get(locale);
+    let entry = {};
+    // Prefill (fork) takes precedence over the indexed entry it converts, so a
+    // fork opens with structural/fork + canonical content, not the old entry.
+    if (editing?.prefill) entry = editing.prefill;
+    else if (Number.isInteger(editing?.index) && layer) entry = layer.entries[editing.index];
+    const blocks = this._canonical?.blocks ?? [];
+    const busy = this._adaptBusy.has(locale);
+    return html`
+      <div class="mrd-entry-form">
+        <div>
+          <label for="af-block">Block</label>
+          <input id="af-block" list="af-blocks" ?disabled=${busy}
+            value=${entry.blockId ?? ''} placeholder="existing or new block id" />
+          <datalist id="af-blocks">
+            ${blocks.map((b) => html`<option value=${b.id}></option>`)}
+          </datalist>
+        </div>
+        <div>
+          <label for="af-layer">Layer</label>
+          <select id="af-layer" ?disabled=${busy}>
+            ${LAYER_PRECEDENCE.map((l) => html`<option value=${l} ?selected=${l === entry.layer}>${l}</option>`)}
+          </select>
+        </div>
+        <div>
+          <label for="af-op">Operation</label>
+          <select id="af-op" ?disabled=${busy}>
+            ${OPERATIONS.map((o) => html`<option value=${o} ?selected=${o === entry.operation}>${o}</option>`)}
+          </select>
+        </div>
+        <div>
+          <label>&nbsp;</label>
+          <sl-button ?disabled=${busy} @click=${() => this.suggestLayer()}>Suggest layer</sl-button>
+        </div>
+        <div class="mrd-field-wide">
+          <label for="af-value">Value (JSON or text)</label>
+          <textarea id="af-value" ?disabled=${busy}>${entryValueString(entry.value)}</textarea>
+        </div>
+        <div class="mrd-field-wide">
+          <label for="af-reason">Reason</label>
+          <textarea id="af-reason" ?disabled=${busy}>${entry.reason ?? ''}</textarea>
+        </div>
+        ${this._suggest ? html`<div class="mrd-suggest">${this._suggest}</div>` : nothing}
+        <div class="mrd-form-actions">
+          <sl-button ?disabled=${busy} @click=${() => this.cancelEdit()}>Cancel</sl-button>
+          <sl-button ?disabled=${busy} @click=${() => this.saveEntry(locale)}>Save adaptation</sl-button>
+        </div>
+      </div>`;
+  }
+
+  renderAdaptCard(locale) {
+    const layer = this._layers.get(locale);
+    const entries = layer?.entries ?? [];
+    const present = [...new Set(entries.map((e) => e.layer))]
+      .sort((a, b) => LAYER_PRECEDENCE.indexOf(a) - LAYER_PRECEDENCE.indexOf(b));
+    const editingHere = this._editing?.locale === locale;
+    return html`
+      <div class="mrd-market">
+        <div class="mrd-market-head">
+          <span class="mrd-locale">${locale}</span>
+          <span class="mrd-layer-chips">
+            ${present.map((l) => html`<span class="mrd-layer-chip mrd-layer-${l}">${l}</span>`)}
+          </span>
+        </div>
+        ${this.isNonPublishable(locale) ? html`
+          <div class="mrd-nonpublishable">
+            ${icon('S2_Icon_AlertDiamond', '0 0 18 18')} Non-publishable — required compliance layer absent
+          </div>` : nothing}
+        ${entries.length
+    ? entries.map((e, i) => this.renderEntry(locale, e, i))
+    : html`<div class="mrd-empty">No adaptations yet.</div>`}
+        ${editingHere
+    ? this.renderEntryForm(locale)
+    : html`<sl-button class="mrd-add-entry" @click=${() => this.startAdd(locale)}>Add adaptation</sl-button>`}
+      </div>`;
+  }
+
+  renderAdaptations() {
+    if (!this._policies?.length) return html`<div class="mrd-empty">No markets configured.</div>`;
+    return html`
+      <p class="mrd-adapt-intro">
+        Author why each market differs — every difference is a typed, reasoned layer that recomputes with canonical.
+      </p>
+      <div class="mrd-list">${this._policies.map((p) => this.renderAdaptCard(p.locale))}</div>
+    `;
+  }
+
   renderContent() {
     if (this._state === 'init') return nothing;
     if (this._state === 'loading') return html`<div class="mrd-loading">Scanning ${this._org}/${this._site}…</div>`;
-    return this._tab === 'taste' ? this.renderTaste() : this.renderExposure();
+    if (this._tab === 'taste') return this.renderTaste();
+    if (this._tab === 'adapt') return this.renderAdaptations();
+    return this.renderExposure();
   }
 
   render() {

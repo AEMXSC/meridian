@@ -20,7 +20,7 @@
 
 /**
  * @typedef {'language'|'creative'|'commercial'|'compliance'|'structural'} LayerType
- * @typedef {'translate'|'override'|'insert'} LayerOperation
+ * @typedef {'translate'|'override'|'insert'|'fork'} LayerOperation
  * @typedef {'auto-applied'|'human-owned'|'human-owned-nonnegotiable'} LayerStatus
  * @typedef {'stale'|'missing-required'|'drift'|'low-confidence'|'uncovered'} FindingKind
  * @typedef {'critical'|'warning'|'info'} Severity
