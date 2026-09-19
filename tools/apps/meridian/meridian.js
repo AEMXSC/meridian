@@ -59,6 +59,7 @@ class MeridianApp extends LitElement {
     _tab: { state: true },
     _queue: { state: true },
     _queueBusy: { state: true },
+    _rejectingKey: { state: true },
   };
 
   connectedCallback() {
@@ -74,6 +75,7 @@ class MeridianApp extends LitElement {
     this._tab = 'exposure';
     this._queue = [];
     this._queueBusy = new Set();
+    this._rejectingKey = '';
     if (this._org && this._site) this.scan();
   }
 
@@ -110,21 +112,36 @@ class MeridianApp extends LitElement {
       this._queue = await this._store.listQueue();
     } catch (e) {
       console.error('Failed to load taste queue', e);
+      this._error = `Could not load taste queue: ${e.message}`;
     }
   }
 
   // Approve a gated item: promote its materialized variant to /live and clear
   // the queue entry — the publish runs under the author's own DA session.
+  // A compliance-blocked item can never be published: this guard is the
+  // authoritative check (the disabled button is only a UI cue), so a blocked
+  // item is rejected here even if approve() is reached by any other path.
   async approve(item) {
+    if (item.gate === 'blocked') {
+      this._error = `Cannot approve ${item.locale}: compliance layer absent — publishing is blocked.`;
+      return;
+    }
     const key = `${item.locale}:${item.canonicalId}`;
     if (this._queueBusy.has(key)) return;
     this._queueBusy = new Set(this._queueBusy).add(key);
     try {
       await this._store.writeVariant(item.variant);
-      await this._store.removeQueueItem(item.locale, item.canonicalId);
+      // The variant is now live. Clearing the queue entry is a separate write;
+      // if it fails the content is already published, so report that distinctly
+      // from a publish failure and note that re-approving is safe (idempotent).
+      try {
+        await this._store.removeQueueItem(item.locale, item.canonicalId);
+      } catch (e) {
+        this._error = `Published ${item.locale} to /live, but could not clear its queue entry (${e.message}). Re-approving is safe.`;
+      }
       await Promise.all([this.loadQueue(), this.scan()]);
     } catch (e) {
-      this._error = `Approve failed for ${item.locale}: ${e.message}`;
+      this._error = `Approve failed for ${item.locale} — nothing published: ${e.message}`;
     } finally {
       const done = new Set(this._queueBusy);
       done.delete(key);
@@ -132,15 +149,37 @@ class MeridianApp extends LitElement {
     }
   }
 
-  async reject(item) {
+  startReject(item) {
+    this._rejectingKey = `${item.locale}:${item.canonicalId}`;
+  }
+
+  cancelReject() {
+    this._rejectingKey = '';
+  }
+
+  // Persist the reason before removing the pending entry. Uses an inline
+  // sl-input rather than window.prompt: an app iframe without allow-modals
+  // silently returns null from prompt(), which would make reject a no-op.
+  async confirmReject(item) {
+    const reason = this.shadowRoot.querySelector('.mrd-reject-input')?.value.trim();
+    if (!reason) {
+      this._error = `A reason is required to reject ${item.locale}.`;
+      return;
+    }
     const key = `${item.locale}:${item.canonicalId}`;
-    // eslint-disable-next-line no-alert
-    const reason = window.prompt(`Reason for rejecting ${item.locale}?`);
-    if (!reason) return;
     if (this._queueBusy.has(key)) return;
     this._queueBusy = new Set(this._queueBusy).add(key);
     try {
+      await this._store.writeRejection({
+        locale: item.locale,
+        canonicalId: item.canonicalId,
+        gate: item.gate,
+        reason,
+        rejectedBy: this.context?.user?.email || 'unknown',
+        rejectedAt: new Date().toISOString(),
+      });
       await this._store.removeQueueItem(item.locale, item.canonicalId);
+      this._rejectingKey = '';
       await this.loadQueue();
     } catch (e) {
       this._error = `Reject failed for ${item.locale}: ${e.message}`;
@@ -299,6 +338,7 @@ class MeridianApp extends LitElement {
     const key = `${item.locale}:${item.canonicalId}`;
     const busy = this._queueBusy.has(key);
     const blocked = item.gate === 'blocked';
+    const rejecting = this._rejectingKey === key;
     return html`
       <div class="mrd-market">
         <div class="mrd-market-head">
@@ -309,9 +349,16 @@ class MeridianApp extends LitElement {
             <sl-button ?disabled=${busy || blocked}
               title=${blocked ? 'Compliance absent — cannot publish' : 'Publish to /live'}
               @click=${() => this.approve(item)}>Approve</sl-button>
-            <sl-button ?disabled=${busy} @click=${() => this.reject(item)}>Reject</sl-button>
+            <sl-button ?disabled=${busy} @click=${() => this.startReject(item)}>Reject</sl-button>
           </span>
         </div>
+        ${rejecting ? html`
+          <div class="mrd-reject-form">
+            <sl-input class="mrd-reject-input" ?disabled=${busy}
+              placeholder="Reason for rejecting ${item.locale}…"></sl-input>
+            <sl-button ?disabled=${busy} @click=${() => this.confirmReject(item)}>Confirm reject</sl-button>
+            <sl-button ?disabled=${busy} @click=${() => this.cancelReject()}>Cancel</sl-button>
+          </div>` : nothing}
       </div>`;
   }
 

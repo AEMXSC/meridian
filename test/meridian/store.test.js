@@ -16,7 +16,9 @@
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { canonPath, adaptPath, livePath } from '../../tools/apps/meridian/core/store.js';
+import {
+  canonPath, adaptPath, livePath, queuePath, rejectionPath,
+} from '../../tools/apps/meridian/core/store.js';
 
 const ID = 'canon/offers/spring-refresh';
 
@@ -24,6 +26,8 @@ test('path builders scope under the base for valid inputs', () => {
   assert.equal(canonPath('/meridian', ID), '/meridian/canon/offers/spring-refresh.json');
   assert.equal(adaptPath('/meridian', 'es_mx', ID), '/meridian/adapt/es_mx/offers/spring-refresh.json');
   assert.equal(livePath('/meridian', 'es_mx', ID), '/meridian/live/es_mx/offers/spring-refresh.json');
+  assert.equal(queuePath('/meridian', 'es_mx', ID), '/meridian/taste-queue/es_mx/offers/spring-refresh.json');
+  assert.equal(rejectionPath('/meridian', 'es_mx', ID), '/meridian/rejections/es_mx/offers/spring-refresh.json');
 });
 
 test('path builders reject traversal and malformed segments', () => {
@@ -33,4 +37,6 @@ test('path builders reject traversal and malformed segments', () => {
   assert.throws(() => adaptPath('/meridian', '../etc', ID), /Unsafe locale/);
   assert.throws(() => adaptPath('/meridian', 'es/mx', ID), /Unsafe locale/);
   assert.throws(() => livePath('/meridian', 'es_mx', 'canon/../secret'), /Unsafe canonicalId/);
+  assert.throws(() => rejectionPath('/meridian', '../etc', ID), /Unsafe locale/);
+  assert.throws(() => rejectionPath('/meridian', 'es_mx', 'canon/../secret'), /Unsafe canonicalId/);
 });

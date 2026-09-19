@@ -77,6 +77,12 @@ export function queuePath(base, locale, id) {
   return `${base}/taste-queue/${locale}/${relPath(id)}.json`;
 }
 
+export function rejectionPath(base, locale, id) {
+  assertLocale(locale);
+  assertCanonicalId(id);
+  return `${base}/rejections/${locale}/${relPath(id)}.json`;
+}
+
 export default class DaStore {
   #org;
 
@@ -170,26 +176,40 @@ export default class DaStore {
     return this.#readJson(queuePath(this.#base, locale, canonicalId));
   }
 
-  // Walk the taste-queue folder and return every pending item.
+  // Walk the taste-queue folder and return every pending item. A 404 means the
+  // folder doesn't exist yet (empty queue); any other non-OK status throws so an
+  // auth/server error is never silently reported as an empty queue — same
+  // 404-vs-error convention as #readJson.
   async listQueue() {
     const items = [];
     const walk = async (path) => {
       const resp = await daFetch(`${DA_ORIGIN}/list/${this.#org}/${this.#site}${path}`, { cache: 'no-store' });
-      if (!resp.ok) return;
+      if (resp.status === 404) return;
+      if (!resp.ok) throw new Error(`Queue list failed for ${path} (${resp.status})`);
       const entries = await resp.json();
+      if (!Array.isArray(entries)) return;
       await Promise.all(entries.map(async (entry) => {
         const isFolder = !entry.ext && !entry.name.includes('.');
         const child = `${path}/${entry.name}`;
         if (isFolder) {
           await walk(child);
         } else if (entry.name.endsWith('.json')) {
-          const item = await this.#readJson(child).catch(() => null);
+          const item = await this.#readJson(child);
           if (item) items.push(item);
         }
       }));
     };
     await walk(`${this.#base}/taste-queue`);
     return items;
+  }
+
+  // Persist a rejection record so the human's stated reason is auditable even
+  // after the pending queue entry is removed (PRD §6 reject-with-reason).
+  writeRejection(record) {
+    return this.#writeJson(
+      rejectionPath(this.#base, record.locale, record.canonicalId),
+      record,
+    );
   }
 
   async removeQueueItem(locale, canonicalId) {

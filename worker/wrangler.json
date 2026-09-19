@@ -1,5 +1,6 @@
 {
   "name": "meridian-worker",
+  "main": "src/index.js",
   "account_id": "d0edeea3395e95b1117b944129fec1fe",
   "compatibility_date": "2026-09-01",
   "observability": { "enabled": true }

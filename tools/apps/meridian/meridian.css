@@ -212,3 +212,14 @@
   display: flex;
   gap: 8px;
 }
+
+.mrd-reject-form {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  margin-top: 8px;
+}
+
+.mrd-reject-input {
+  flex: 1;
+}
