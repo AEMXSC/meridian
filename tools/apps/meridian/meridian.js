@@ -56,6 +56,9 @@ class MeridianApp extends LitElement {
     _error: { state: true },
     _diffs: { state: true },
     _loadingDiffs: { state: true },
+    _tab: { state: true },
+    _queue: { state: true },
+    _queueBusy: { state: true },
   };
 
   connectedCallback() {
@@ -68,6 +71,9 @@ class MeridianApp extends LitElement {
     this._diffs = new Map();
     this._loadingDiffs = new Set();
     this._error = '';
+    this._tab = 'exposure';
+    this._queue = [];
+    this._queueBusy = new Set();
     if (this._org && this._site) this.scan();
   }
 
@@ -91,10 +97,57 @@ class MeridianApp extends LitElement {
       this._canonicalId = config.canonicalId;
       this._findings = await scanCanonical(this._store, config.canonicalId, config.policies);
       this._state = 'ready';
+      this.loadQueue();
     } catch (e) {
       console.error(e);
       this._error = e.message || 'Scan failed.';
       this._state = 'init';
+    }
+  }
+
+  async loadQueue() {
+    try {
+      this._queue = await this._store.listQueue();
+    } catch (e) {
+      console.error('Failed to load taste queue', e);
+    }
+  }
+
+  // Approve a gated item: promote its materialized variant to /live and clear
+  // the queue entry — the publish runs under the author's own DA session.
+  async approve(item) {
+    const key = `${item.locale}:${item.canonicalId}`;
+    if (this._queueBusy.has(key)) return;
+    this._queueBusy = new Set(this._queueBusy).add(key);
+    try {
+      await this._store.writeVariant(item.variant);
+      await this._store.removeQueueItem(item.locale, item.canonicalId);
+      await Promise.all([this.loadQueue(), this.scan()]);
+    } catch (e) {
+      this._error = `Approve failed for ${item.locale}: ${e.message}`;
+    } finally {
+      const done = new Set(this._queueBusy);
+      done.delete(key);
+      this._queueBusy = done;
+    }
+  }
+
+  async reject(item) {
+    const key = `${item.locale}:${item.canonicalId}`;
+    // eslint-disable-next-line no-alert
+    const reason = window.prompt(`Reason for rejecting ${item.locale}?`);
+    if (!reason) return;
+    if (this._queueBusy.has(key)) return;
+    this._queueBusy = new Set(this._queueBusy).add(key);
+    try {
+      await this._store.removeQueueItem(item.locale, item.canonicalId);
+      await this.loadQueue();
+    } catch (e) {
+      this._error = `Reject failed for ${item.locale}: ${e.message}`;
+    } finally {
+      const done = new Set(this._queueBusy);
+      done.delete(key);
+      this._queueBusy = done;
     }
   }
 
@@ -165,13 +218,20 @@ class MeridianApp extends LitElement {
   renderToolbar() {
     return html`
       <div class="mrd-toolbar">
-        <h1>Meridian — Exposure</h1>
+        <h1>Meridian</h1>
         <form class="mrd-form" @submit=${this.handleSubmit}>
           <sl-input id="org-input" placeholder="org" value=${this._org} ?disabled=${this._state === 'loading'}></sl-input>
           <sl-input id="site-input" placeholder="site" value=${this._site} ?disabled=${this._state === 'loading'}></sl-input>
           <sl-button ?disabled=${this._state === 'loading'} @click=${this.handleSubmit}>Scan</sl-button>
         </form>
       </div>
+      ${this._state === 'ready' ? html`
+        <div class="mrd-tabs">
+          <button class="mrd-tab ${this._tab === 'exposure' ? 'active' : ''}"
+            @click=${() => { this._tab = 'exposure'; }}>Exposure queue</button>
+          <button class="mrd-tab ${this._tab === 'taste' ? 'active' : ''}"
+            @click=${() => { this._tab = 'taste'; }}>Taste queue${this._queue.length ? html` <span class="mrd-badge">${this._queue.length}</span>` : nothing}</button>
+        </div>` : nothing}
       ${this._error ? html`<div class="nx-alert warning">${this._error}</div>` : nothing}
     `;
   }
@@ -223,9 +283,7 @@ class MeridianApp extends LitElement {
       </div>`;
   }
 
-  renderContent() {
-    if (this._state === 'init') return nothing;
-    if (this._state === 'loading') return html`<div class="mrd-loading">Scanning ${this._org}/${this._site}…</div>`;
+  renderExposure() {
     if (!this._findings.length) return html`<div class="mrd-empty">No exposures found.</div>`;
     const s = this._summary;
     return html`
@@ -235,6 +293,37 @@ class MeridianApp extends LitElement {
       </div>
       <div class="mrd-list">${this._byLocale.map((g) => this.renderMarket(g))}</div>
     `;
+  }
+
+  renderQueueItem(item) {
+    const key = `${item.locale}:${item.canonicalId}`;
+    const busy = this._queueBusy.has(key);
+    const blocked = item.gate === 'blocked';
+    return html`
+      <div class="mrd-market">
+        <div class="mrd-market-head">
+          <span class="mrd-kind mrd-${blocked ? 'critical' : 'warning'}">${item.gate}</span>
+          <span class="mrd-locale">${item.locale}</span>
+          <span class="mrd-detail">${item.reason}</span>
+          <span class="mrd-queue-actions">
+            <sl-button ?disabled=${busy || blocked}
+              title=${blocked ? 'Compliance absent — cannot publish' : 'Publish to /live'}
+              @click=${() => this.approve(item)}>Approve</sl-button>
+            <sl-button ?disabled=${busy} @click=${() => this.reject(item)}>Reject</sl-button>
+          </span>
+        </div>
+      </div>`;
+  }
+
+  renderTaste() {
+    if (!this._queue.length) return html`<div class="mrd-empty">Taste queue is empty.</div>`;
+    return html`<div class="mrd-list">${this._queue.map((i) => this.renderQueueItem(i))}</div>`;
+  }
+
+  renderContent() {
+    if (this._state === 'init') return nothing;
+    if (this._state === 'loading') return html`<div class="mrd-loading">Scanning ${this._org}/${this._site}…</div>`;
+    return this._tab === 'taste' ? this.renderTaste() : this.renderExposure();
   }
 
   render() {

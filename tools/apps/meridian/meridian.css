@@ -172,3 +172,43 @@
 
 .mrd-expected { background: #eaf6ee; }
 .mrd-actual { background: #fdeceb; }
+
+.mrd-tabs {
+  display: flex;
+  gap: 4px;
+  margin: 16px 0 8px;
+  border-bottom: 1px solid #e1e1e1;
+}
+
+.mrd-tab {
+  background: none;
+  border: none;
+  border-bottom: 2px solid transparent;
+  padding: 8px 14px;
+  font: inherit;
+  color: #6e6e6e;
+  cursor: pointer;
+}
+
+.mrd-tab.active {
+  color: #1d1d1d;
+  font-weight: 700;
+  border-bottom-color: #1473e6;
+}
+
+.mrd-badge {
+  display: inline-block;
+  min-width: 18px;
+  padding: 0 6px;
+  border-radius: 10px;
+  background: #e68619;
+  color: #fff;
+  font-size: 12px;
+  text-align: center;
+}
+
+.mrd-queue-actions {
+  margin-left: auto;
+  display: flex;
+  gap: 8px;
+}

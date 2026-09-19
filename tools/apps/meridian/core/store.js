@@ -170,6 +170,28 @@ export default class DaStore {
     return this.#readJson(queuePath(this.#base, locale, canonicalId));
   }
 
+  // Walk the taste-queue folder and return every pending item.
+  async listQueue() {
+    const items = [];
+    const walk = async (path) => {
+      const resp = await daFetch(`${DA_ORIGIN}/list/${this.#org}/${this.#site}${path}`, { cache: 'no-store' });
+      if (!resp.ok) return;
+      const entries = await resp.json();
+      await Promise.all(entries.map(async (entry) => {
+        const isFolder = !entry.ext && !entry.name.includes('.');
+        const child = `${path}/${entry.name}`;
+        if (isFolder) {
+          await walk(child);
+        } else if (entry.name.endsWith('.json')) {
+          const item = await this.#readJson(child).catch(() => null);
+          if (item) items.push(item);
+        }
+      }));
+    };
+    await walk(`${this.#base}/taste-queue`);
+    return items;
+  }
+
   async removeQueueItem(locale, canonicalId) {
     const resp = await daFetch(
       this.#sourceUrl(queuePath(this.#base, locale, canonicalId)),
