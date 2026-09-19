@@ -1,0 +1,11 @@
+{
+  "name": "@meridian/agents",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Meridian MCP server: the localization engine as agent tools (PRD §9).",
+  "bin": { "meridian-mcp": "./src/index.js" },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.0.0"
+  }
+}
