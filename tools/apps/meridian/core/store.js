@@ -83,6 +83,22 @@ export function rejectionPath(base, locale, id) {
   return `${base}/rejections/${locale}/${relPath(id)}.json`;
 }
 
+// List the sites (top-level folders) in an org via the DA list API, so the app's
+// picker can offer every site in the org — not a hardcoded one. Authenticated
+// through the signed-in user's daFetch. Mirrors config-console's fetchSiteList.
+export async function listSites(org) {
+  if (!org || org.length < 2) return [];
+  try {
+    const resp = await daFetch(`${DA_ORIGIN}/list/${org}/`, { cache: 'no-store' });
+    if (!resp.ok) return [];
+    const items = await resp.json();
+    if (!Array.isArray(items)) return [];
+    return items.filter((item) => !item.ext).map((item) => item.name);
+  } catch {
+    return [];
+  }
+}
+
 export default class DaStore {
   #org;
 

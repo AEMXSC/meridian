@@ -47,6 +47,22 @@
   align-items: center;
 }
 
+.mrd-picker-input {
+  font: inherit;
+  font-size: 14px;
+  padding: 5px 12px;
+  border: var(--sl-field-border, 2px solid var(--mrd-border));
+  border-radius: var(--mrd-radius-pill);
+  background: var(--mrd-surface);
+  color: var(--mrd-text);
+  width: 140px;
+}
+
+.mrd-picker-input:focus {
+  outline: none;
+  border-color: var(--mrd-accent);
+}
+
 .nx-alert.warning {
   margin: var(--mrd-space-200) 0;
   padding: 10px 14px;

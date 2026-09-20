@@ -16,7 +16,7 @@
 /* eslint-disable no-underscore-dangle, import/no-unresolved, no-console, class-methods-use-this */
 import DA_SDK from 'https://da.live/nx/utils/sdk.js';
 import { LitElement, html, nothing } from 'da-lit';
-import DaStore from './core/store.js';
+import DaStore, { listSites } from './core/store.js';
 import scanCanonical from './core/scan.js';
 import variantStatus from './core/variant-status.js';
 import { diffVariants, onlyChanges } from './core/diff.js';
@@ -91,6 +91,8 @@ class MeridianApp extends LitElement {
     _proposing: { state: true },
     _proposal: { state: true },
     _config: { state: true },
+    _sites: { state: true },
+    _recent: { state: true },
   };
 
   connectedCallback() {
@@ -115,7 +117,46 @@ class MeridianApp extends LitElement {
     this._proposing = false;
     this._proposal = null;
     this._config = null;
+    this._recent = this.loadRecent();
+    this._sites = [];
+    // Deep-link / editor context wins; otherwise fall back to the most recent
+    // org/site so a returning author lands where they left off.
+    this._org = this._org || (this._recent[0]?.org ?? '');
+    this._site = this._site || (this._recent[0]?.site ?? '');
     if (this._org && this._site) this.scan();
+    else if (this._org) this.loadSites();
+  }
+
+  // Recent org/site pairs, persisted in localStorage so the picker can suggest
+  // them across sessions (mirrors config-console's recent-path pattern).
+  loadRecent() {
+    try {
+      const arr = JSON.parse(localStorage.getItem('meridian-recent') || '[]');
+      return Array.isArray(arr) ? arr.filter((r) => r && r.org && r.site) : [];
+    } catch {
+      return [];
+    }
+  }
+
+  saveRecent(org, site) {
+    if (!org || !site) return;
+    const next = [{ org, site }, ...this._recent.filter((r) => !(r.org === org && r.site === site))]
+      .slice(0, 10);
+    this._recent = next;
+    try {
+      localStorage.setItem('meridian-recent', JSON.stringify(next));
+    } catch {
+      // storage full/unavailable — in-memory suggestions still work
+    }
+  }
+
+  async loadSites() {
+    this._sites = await listSites(this._org);
+  }
+
+  async onOrgChange(e) {
+    this._org = e.target.value.trim();
+    await this.loadSites();
   }
 
   async scan() {
@@ -140,6 +181,7 @@ class MeridianApp extends LitElement {
       this._policies = config.policies;
       this._findings = await scanCanonical(this._store, config.canonicalId, config.policies);
       this._state = 'ready';
+      this.saveRecent(this._org, this._site);
       this.loadQueue();
       this.loadAdaptations();
     } catch (e) {
@@ -537,13 +579,28 @@ class MeridianApp extends LitElement {
     return this._policies.filter((p) => !affected.has(p.locale)).length;
   }
 
+  // Sites to suggest for the current org: those recently used, merged with the
+  // full list fetched live from the DA list API (any site in the org).
+  get siteSuggestions() {
+    const recentForOrg = this._recent.filter((r) => r.org === this._org).map((r) => r.site);
+    return [...new Set([...recentForOrg, ...this._sites])].filter(Boolean);
+  }
+
   renderToolbar() {
     return html`
       <div class="mrd-toolbar">
         <h1>Meridian</h1>
         <form class="mrd-form" @submit=${this.handleSubmit}>
-          <sl-input id="org-input" placeholder="org" value=${this._org} ?disabled=${this._state === 'loading'}></sl-input>
-          <sl-input id="site-input" placeholder="site" value=${this._site} ?disabled=${this._state === 'loading'}></sl-input>
+          <input class="mrd-picker-input" id="org-input" list="mrd-orgs" placeholder="org"
+            value=${this._org} ?disabled=${this._state === 'loading'} @change=${this.onOrgChange} />
+          <datalist id="mrd-orgs">
+            ${[...new Set(this._recent.map((r) => r.org))].map((o) => html`<option value=${o}></option>`)}
+          </datalist>
+          <input class="mrd-picker-input" id="site-input" list="mrd-sites" placeholder="site"
+            value=${this._site} ?disabled=${this._state === 'loading'} />
+          <datalist id="mrd-sites">
+            ${this.siteSuggestions.map((s) => html`<option value=${s}></option>`)}
+          </datalist>
           <sl-button ?disabled=${this._state === 'loading'} @click=${this.handleSubmit}>Scan</sl-button>
         </form>
       </div>
