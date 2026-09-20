@@ -22,6 +22,7 @@ import variantStatus from './core/variant-status.js';
 import { diffVariants, onlyChanges } from './core/diff.js';
 import { materialize } from './core/materialize.js';
 import createClassifier from './core/classify.js';
+import createArchitect from './core/propose.js';
 import { LAYER_PRECEDENCE } from './core/schemas.js';
 import { icon } from '../msm/core/icons.js';
 import 'https://da.live/nx/public/sl/components.js';
@@ -30,6 +31,7 @@ const NX = 'https://da.live/nx';
 const SEVERITY_RANK = { critical: 0, warning: 1, info: 2 };
 const OPERATIONS = ['translate', 'override', 'insert', 'fork'];
 const classify = createClassifier();
+const architect = createArchitect();
 
 let sl = null;
 let tokens = null;
@@ -86,6 +88,9 @@ class MeridianApp extends LitElement {
     _adaptBusy: { state: true },
     _suggest: { state: true },
     _confirmKey: { state: true },
+    _proposing: { state: true },
+    _proposal: { state: true },
+    _config: { state: true },
   };
 
   connectedCallback() {
@@ -107,6 +112,9 @@ class MeridianApp extends LitElement {
     this._adaptBusy = new Set();
     this._suggest = '';
     this._confirmKey = '';
+    this._proposing = false;
+    this._proposal = null;
+    this._config = null;
     if (this._org && this._site) this.scan();
   }
 
@@ -127,6 +135,7 @@ class MeridianApp extends LitElement {
         this._state = 'init';
         return;
       }
+      this._config = config;
       this._canonicalId = config.canonicalId;
       this._policies = config.policies;
       this._findings = await scanCanonical(this._store, config.canonicalId, config.policies);
@@ -391,6 +400,70 @@ class MeridianApp extends LitElement {
     } catch (e) {
       console.error('Rescan after authoring failed', e);
       this._error = `Saved, but could not refresh findings: ${e.message}`;
+    }
+  }
+
+  // ---- Setup surface (Phase 4): stand up a market from one sentence --------
+  startPropose() {
+    this._proposal = null;
+    this._proposing = true;
+  }
+
+  cancelPropose() {
+    this._proposing = false;
+    this._proposal = null;
+  }
+
+  // Locale Architect Agent: turn the typed intent into a proposed policy for
+  // review. Proposes only — nothing is written until the human hits Activate.
+  propose() {
+    const intent = this.shadowRoot.querySelector('#lp-intent')?.value.trim();
+    if (!intent) {
+      this._error = 'Describe the market in a sentence first.';
+      return;
+    }
+    this._error = '';
+    this._proposal = architect(intent);
+  }
+
+  // Activate the reviewed proposal: append its policy to config and seed an
+  // empty adaptation layer so the market is covered and ready for authoring.
+  // Scoped to the loaded org/site, so this stands a market up on any site.
+  async activateMarket() {
+    const p = this._proposal;
+    if (!p) return;
+    // The reviewer can correct/supply the locale in the form before activating.
+    const locale = (this.shadowRoot.querySelector('#lp-locale')?.value || p.locale || '').trim();
+    if (!locale) {
+      this._error = 'Set a locale (e.g. fr_ca) before activating.';
+      return;
+    }
+    if (this._adaptBusy.has(locale)) return;
+    this._adaptBusy = new Set(this._adaptBusy).add(locale);
+    try {
+      const existing = this._policies ?? [];
+      const policy = { locale, requiredLayers: p.requiredLayers };
+      const policies = existing.some((x) => x.locale === locale)
+        ? existing.map((x) => (x.locale === locale ? policy : x))
+        : [...existing, policy];
+      const nextConfig = { ...this._config, canonicalId: this._canonicalId, policies };
+      await this._store.writeConfig(nextConfig);
+      if (!this._layers.get(locale)) {
+        await this._store.writeLayer({
+          locale, canonicalId: this._canonicalId, entries: [],
+        });
+      }
+      this._config = nextConfig;
+      this._policies = policies;
+      this._proposal = null;
+      this._proposing = false;
+      await this.refreshAfterAuthoring();
+    } catch (e) {
+      this._error = `Activate failed for ${locale}: ${e.message}`;
+    } finally {
+      const done = new Set(this._adaptBusy);
+      done.delete(locale);
+      this._adaptBusy = done;
     }
   }
 
@@ -705,13 +778,48 @@ class MeridianApp extends LitElement {
       </div>`;
   }
 
+  renderNewMarket() {
+    if (!this._proposing) {
+      return html`<sl-button class="mrd-newmarket-btn" @click=${() => this.startPropose()}>+ New market</sl-button>`;
+    }
+    const p = this._proposal;
+    const busy = p && this._adaptBusy.has(p.locale);
+    return html`
+      <div class="mrd-newmarket">
+        <label for="lp-intent">Describe the market in a sentence</label>
+        <textarea id="lp-intent"
+          placeholder="e.g. Add a Quebec French market: translate everything, keep US pricing, and it legally needs a French disclosure."></textarea>
+        <div class="mrd-form-actions">
+          <sl-button @click=${() => this.cancelPropose()}>Cancel</sl-button>
+          <sl-button @click=${() => this.propose()}>Propose</sl-button>
+        </div>
+        ${p ? html`
+          <div class="mrd-proposal">
+            <div class="mrd-market-head">
+              <input id="lp-locale" class="mrd-locale-input" value=${p.locale ?? ''}
+                placeholder="locale e.g. fr_ca" ?disabled=${busy} />
+              <span class="mrd-layer-chips">
+                ${p.requiredLayers.map((l) => html`<span class="mrd-layer-chip mrd-layer-${l}">${l}</span>`)}
+              </span>
+              <span class="mrd-entry-meta">confidence ${p.confidence}</span>
+            </div>
+            <ul class="mrd-notes">${p.notes.map((n) => html`<li>${n}</li>`)}</ul>
+            <div class="mrd-form-actions">
+              <sl-button ?disabled=${busy} @click=${() => this.activateMarket()}>Activate market</sl-button>
+            </div>
+          </div>` : nothing}
+      </div>`;
+  }
+
   renderAdaptations() {
-    if (!this._policies?.length) return html`<div class="mrd-empty">No markets configured.</div>`;
     return html`
       <p class="mrd-adapt-intro">
         Author why each market differs — every difference is a typed, reasoned layer that recomputes with canonical.
       </p>
-      <div class="mrd-list">${this._policies.map((p) => this.renderAdaptCard(p.locale))}</div>
+      ${this.renderNewMarket()}
+      ${this._policies?.length
+    ? html`<div class="mrd-list">${this._policies.map((p) => this.renderAdaptCard(p.locale))}</div>`
+    : html`<div class="mrd-empty">No markets yet — describe one above to stand it up.</div>`}
     `;
   }
 

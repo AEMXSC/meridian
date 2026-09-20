@@ -81,6 +81,9 @@ export default function nodeStore(org, site, base = '/meridian') {
     },
     readLayer: (locale, id) => get(org, site, adaptPath(base, locale, id)),
     readVariant: (locale, id) => get(org, site, livePath(base, locale, id)),
+    writeConfig: (config) => put(org, site, `${base}/config.json`, config),
+    writeCanonical: (canonical) => put(org, site, canonPath(base, canonical.id), canonical),
+    writeLayer: (layer) => put(org, site, adaptPath(base, layer.locale, layer.canonicalId), layer),
     writeVariant: (variant) => {
       const p = livePath(base, variant.locale, variant.canonicalId);
       return put(org, site, p, variant);

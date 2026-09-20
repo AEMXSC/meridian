@@ -429,3 +429,69 @@
 .mrd-add-entry {
   margin-top: 10px;
 }
+
+/* ---- Setup surface (Phase 4: new market) ---------------------------- */
+.mrd-newmarket-btn {
+  margin-bottom: var(--mrd-space-200);
+}
+
+.mrd-newmarket {
+  margin-bottom: var(--mrd-space-200);
+  padding: 16px;
+  background: var(--mrd-surface);
+  border: 1px solid var(--mrd-border);
+  border-radius: var(--mrd-radius-card);
+  box-shadow: var(--mrd-shadow-card);
+}
+
+.mrd-newmarket label {
+  display: block;
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--mrd-text-muted);
+  margin-bottom: 4px;
+}
+
+.mrd-newmarket textarea {
+  width: 100%;
+  box-sizing: border-box;
+  min-height: 64px;
+  font: inherit;
+  font-size: 14px;
+  padding: 10px 12px;
+  border: var(--sl-field-border, 2px solid var(--mrd-border));
+  border-radius: var(--mrd-radius-control);
+  background: var(--mrd-surface);
+  color: var(--mrd-text);
+  resize: vertical;
+}
+
+.mrd-proposal {
+  margin-top: 14px;
+  padding: 12px;
+  background: var(--mrd-surface-sunken);
+  border-radius: var(--mrd-radius-control);
+}
+
+.mrd-locale-input {
+  font: inherit;
+  font-weight: 700;
+  font-size: 15px;
+  padding: 4px 10px;
+  border: var(--sl-field-border, 2px solid var(--mrd-border));
+  border-radius: var(--mrd-radius-control);
+  background: var(--mrd-surface);
+  color: var(--mrd-text);
+  width: 160px;
+}
+
+.mrd-notes {
+  margin: 8px 0;
+  padding-left: 18px;
+  font-size: 13px;
+  color: #4b4b4b;
+}
+
+.mrd-notes li {
+  margin: 2px 0;
+}

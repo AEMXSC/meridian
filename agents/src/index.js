@@ -18,9 +18,11 @@
 
 // Meridian MCP server (PRD §9): the localization engine as agent tools, so it
 // composes inside Experience Workspace and Agent Orchestrator. Each tool reuses
-// the same pure engine the DA app runs, over a Node DA store. exposure.scan is
-// read-only; propagation.apply is the only routine write path and refuses to run
-// without a plan (no silent apply).
+// the same pure engine the DA app runs, over a Node DA store. Read-only tools
+// (exposure.scan, propagation.plan, locale.propose) write nothing. Write paths:
+// propagation.apply (requires an approved plan — no silent apply) and
+// migrate.ingest with apply:true (bootstraps a site from an MSM import; refuses
+// to overwrite a site that already tracks a different canonical).
 
 import { Server } from '@modelcontextprotocol/sdk/server/index.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
@@ -28,7 +30,11 @@ import { ListToolsRequestSchema, CallToolRequestSchema } from '@modelcontextprot
 import scanCanonical from '../../tools/apps/meridian/core/scan.js';
 import { planPropagation, applyPropagation } from '../../tools/apps/meridian/core/propagate.js';
 import rollback from '../../tools/apps/meridian/core/rollback.js';
+import createArchitect from '../../tools/apps/meridian/core/propose.js';
+import ingestMsm from '../../tools/apps/meridian/core/migrate.js';
 import nodeStore from './da-client.js';
+
+const architect = createArchitect();
 
 const orgSite = {
   org: { type: 'string', description: 'DA organization (e.g. aemxsc)' },
@@ -78,6 +84,33 @@ const TOOLS = [
       required: ['org', 'site', 'canonicalId', 'snapshot'],
     },
   },
+  {
+    name: 'meridian_locale_propose',
+    description: 'Setup surface (Locale Architect): turn a natural-language intent (one sentence describing a market) into a proposed adaptation policy — locale, required layers, rationale. Writes nothing; a human reviews and activates.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        intent: { type: 'string', description: 'e.g. "Add a Quebec French market: translate everything, keep US pricing, and it legally needs a French disclosure"' },
+      },
+      required: ['intent'],
+    },
+  },
+  {
+    name: 'meridian_migrate_ingest',
+    description: 'Migration on-ramp: ingest an existing MSM structure (a source doc + per-market copies) into one canonical object plus N typed adaptation sets. Returns canonical, layers, and policies. Writes nothing unless apply:true, which persists them under /meridian for the given site (works for any org/site).',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        ...orgSite,
+        canonicalId: { type: 'string', description: 'Target canonical id, e.g. "canon/offers/spring"' },
+        title: { type: 'string' },
+        source: { type: 'object', description: 'The base/source doc: { blocks: [{ id, type, content }] }' },
+        markets: { type: 'array', description: 'Per-market copies: [{ locale, blocks: [{ id, type, content }] }]', items: { type: 'object' } },
+        apply: { type: 'boolean', description: 'When true, persist canonical + layers + config under /meridian (default false = preview only)' },
+      },
+      required: ['org', 'site', 'canonicalId', 'source', 'markets'],
+    },
+  },
 ];
 
 async function loadLayers(store, canonicalId, policies) {
@@ -116,6 +149,47 @@ async function dispatch(name, args) {
   }
   if (name === 'meridian_propagation_rollback') {
     return rollback(store, args.canonicalId, args.snapshot);
+  }
+  if (name === 'meridian_locale_propose') {
+    return architect(args.intent);
+  }
+  if (name === 'meridian_migrate_ingest') {
+    const result = await ingestMsm({
+      canonicalId: args.canonicalId,
+      title: args.title,
+      source: args.source,
+      markets: args.markets,
+    });
+    if (args.apply) {
+      const current = await store.readConfig();
+      // Never clobber a site that already tracks a different canonical.
+      if (current && current.canonicalId && current.canonicalId !== result.canonical.id) {
+        throw new Error(`Site already tracks ${current.canonicalId}; refusing to overwrite with ${result.canonical.id}.`);
+      }
+      await store.writeCanonical(result.canonical);
+      // Write layers sequentially so a failure is deterministic (which locale)
+      // rather than a concurrent half-applied batch; config is written last so a
+      // partial layer failure never leaves config pointing at missing layers.
+      await [...result.layers.values()].reduce(
+        (chain, layer) => chain.then(() => store.writeLayer(layer)),
+        Promise.resolve(),
+      );
+      // Merge policies by locale into any existing config, preserving other fields.
+      const byLocale = new Map((current?.policies ?? []).map((p) => [p.locale, p]));
+      result.policies.forEach((p) => byLocale.set(p.locale, p));
+      await store.writeConfig({
+        ...current,
+        canonicalId: result.canonical.id,
+        policies: [...byLocale.values()],
+      });
+    }
+    // Serialize the layers Map for JSON output.
+    return {
+      canonical: result.canonical,
+      layers: Object.fromEntries(result.layers),
+      policies: result.policies,
+      applied: Boolean(args.apply),
+    };
   }
   throw new Error(`Unknown tool: ${name}`);
 }

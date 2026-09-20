@@ -20,7 +20,7 @@
 
 /**
  * @typedef {'language'|'creative'|'commercial'|'compliance'|'structural'} LayerType
- * @typedef {'translate'|'override'|'insert'|'fork'} LayerOperation
+ * @typedef {'translate'|'override'|'insert'|'fork'|'remove'} LayerOperation
  * @typedef {'auto-applied'|'human-owned'|'human-owned-nonnegotiable'} LayerStatus
  * @typedef {'stale'|'missing-required'|'drift'|'low-confidence'|'uncovered'} FindingKind
  * @typedef {'critical'|'warning'|'info'} Severity
@@ -53,6 +53,8 @@
  * @property {string} provenance
  * @property {number|null} confidence
  * @property {LayerStatus} status
+ * @property {string} [type] - block type for an `insert` of a market-only block,
+ *   so the derived block renders as its real component (not the layer name)
  */
 
 /**

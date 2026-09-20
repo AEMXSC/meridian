@@ -135,6 +135,10 @@ export default class DaStore {
     return this.#readJson(`${this.#base}/config.json`);
   }
 
+  writeConfig(config) {
+    return this.#writeJson(`${this.#base}/config.json`, config);
+  }
+
   async readCanonical(id) {
     const c = await this.#readJson(this.#canonPath(id));
     if (!c) throw new Error(`Canonical not found: ${id}`);

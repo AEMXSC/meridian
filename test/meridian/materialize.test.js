@@ -187,6 +187,26 @@ test('fork replaces a block and detaches its provenance from canonical', async (
   assert.equal(price.derivedFrom, canon.blocks[1].hash);
 });
 
+test('remove drops a canonical block from the variant', async () => {
+  const canon = await fixtureCanon();
+  const layer = {
+    locale: 'en_gb',
+    canonicalId: canon.id,
+    entries: [{
+      blockId: 'price',
+      layer: 'structural',
+      operation: 'remove',
+      value: null,
+      reason: 'GB drops the price block',
+      provenance: 'human',
+      confidence: null,
+      status: 'human-owned',
+    }],
+  };
+  const ids = materialize(canon, layer).blocks.map((b) => b.id);
+  assert.deepEqual(ids, ['hero'], 'price removed, hero retained');
+});
+
 test('fork on a non-structural layer throws (keeps compliance-drift detectable)', async () => {
   const canon = await fixtureCanon();
   const layer = {

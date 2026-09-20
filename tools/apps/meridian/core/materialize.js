@@ -65,13 +65,26 @@ export function materialize(canonical, layer, locale) {
 
   entries.forEach((entry) => {
     const canonicalBlock = canonical.blocks.find((b) => b.id === entry.blockId);
+    if (entry.operation === 'remove') {
+      // The market drops this block entirely (PRD: markets may omit content the
+      // source carries). Remove it from the derived variant if present; a remove
+      // targeting a nonexistent block is a no-op.
+      if (byId.has(entry.blockId)) {
+        byId.delete(entry.blockId);
+        const at = order.indexOf(entry.blockId);
+        if (at !== -1) order.splice(at, 1);
+      }
+      return;
+    }
     if (entry.operation === 'insert' && !canonicalBlock) {
       // A market-specific block with no canonical counterpart (e.g. a required
-      // disclosure). Appended after canonical blocks, in entry order.
+      // disclosure). Appended after canonical blocks, in entry order. Its real
+      // block type is carried on the entry so it renders as the right component;
+      // the layer name is only a fallback for older entries without a type.
       if (!byId.has(entry.blockId)) order.push(entry.blockId);
       byId.set(entry.blockId, {
         id: entry.blockId,
-        type: entry.layer,
+        type: entry.type ?? entry.layer,
         content: entry.value,
         derivedFrom: `${INSERT_ORIGIN}:${entry.blockId}`,
       });
