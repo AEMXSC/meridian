@@ -80,6 +80,14 @@ test('differing blocks are classified into typed layers', async () => {
   assert.equal(byBlock.legal.status, 'human-owned-nonnegotiable', 'imported compliance stays human-owned');
 });
 
+test('migrated translate/override entries record the source hash for later staleness', async () => {
+  const { canonical, layers } = await ingestMsm(sampleSite(), { now: NOW });
+  const heroHash = canonical.blocks.find((b) => b.id === 'hero').hash;
+  const heroEntry = layers.get('de_de').entries.find((e) => e.blockId === 'hero');
+  assert.ok(heroEntry.sourceHash, 'the imported entry carries a sourceHash');
+  assert.equal(heroEntry.sourceHash, heroHash, 'sourceHash is the canonical block hash it was migrated from');
+});
+
 test('migration is lossless: recompute reproduces each market block byte-for-byte', async () => {
   const { canonical, layers } = await ingestMsm(sampleSite(), { now: NOW });
   const site = sampleSite();

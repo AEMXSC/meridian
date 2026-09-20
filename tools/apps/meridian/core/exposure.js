@@ -96,50 +96,74 @@ export default function scanExposure(input) {
       }
     });
 
-    // stale / drift require a stored variant to compare against.
+    // stale / drift compare against a stored variant when one exists.
+    const staleBlockIds = new Set();
     const storedVariant = stored.get(locale);
-    if (!storedVariant) return;
-
-    // stale: a stored block was derived from an older canonical hash — it did
-    // not recompute after canonical moved. A structurally forked block is
-    // exempt: it took full custody on purpose (PRD §12.3), so divergence from
-    // canonical is intended, not staleness.
-    const staleBlocks = storedVariant.blocks.filter((b) => {
-      if (isForked(b.derivedFrom)) return false;
-      const currentHash = canonicalHash.get(b.id);
-      return currentHash && b.derivedFrom !== currentHash;
-    });
-    staleBlocks.forEach((b) => {
-      findings.push({
-        locale,
-        canonicalId: canonical.id,
-        kind: 'stale',
-        severity: 'critical',
-        detail: `Block ${b.id} in ${locale} derived from an outdated canonical hash`,
-        blockId: b.id,
-        detectedAt,
+    if (storedVariant) {
+      // stale: a stored block was derived from an older canonical hash — it did
+      // not recompute after canonical moved. A structurally forked block is
+      // exempt: it took full custody on purpose (PRD §12.3), so divergence from
+      // canonical is intended, not staleness.
+      const staleBlocks = storedVariant.blocks.filter((b) => {
+        if (isForked(b.derivedFrom)) return false;
+        const currentHash = canonicalHash.get(b.id);
+        return currentHash && b.derivedFrom !== currentHash;
       });
-    });
-
-    // drift: the stored variant diverges from what canonical + layers would
-    // produce right now, even though it is not stale. Signals a hand-edited or
-    // legacy copy. Skipped when stale, so the two kinds never double-report.
-    // Compared structurally (stableStringify) so a DA JSON round-trip that
-    // reorders keys is not mistaken for a content change.
-    if (staleBlocks.length === 0) {
-      const expected = stableStringify(materialize(canonical, layer));
-      const actual = stableStringify(storedVariant);
-      if (expected !== actual) {
+      staleBlocks.forEach((b) => {
+        staleBlockIds.add(b.id);
         findings.push({
           locale,
           canonicalId: canonical.id,
-          kind: 'drift',
+          kind: 'stale',
+          severity: 'critical',
+          detail: `Block ${b.id} in ${locale} derived from an outdated canonical hash`,
+          blockId: b.id,
+          detectedAt,
+        });
+      });
+
+      // drift: the stored variant diverges from what canonical + layers would
+      // produce right now, even though it is not stale. Signals a hand-edited or
+      // legacy copy. Skipped when stale, so the two kinds never double-report.
+      // Compared structurally (stableStringify) so a DA JSON round-trip that
+      // reorders keys is not mistaken for a content change.
+      if (staleBlocks.length === 0) {
+        const expected = stableStringify(materialize(canonical, layer));
+        const actual = stableStringify(storedVariant);
+        if (expected !== actual) {
+          findings.push({
+            locale,
+            canonicalId: canonical.id,
+            kind: 'drift',
+            severity: 'warning',
+            detail: `Stored variant for ${locale} diverges from canonical + layers`,
+            detectedAt,
+          });
+        }
+      }
+    }
+
+    // source-stale: a translate/override entry authored against an older
+    // canonical hash. Its localized value is of outdated source and needs
+    // redoing — caught even after a recompute re-stamps the /live block's hash
+    // (which the stored-block check above can't see). Deduped against a block
+    // already reported stale, so the two never double-report.
+    layer.entries.forEach((entry) => {
+      const tracks = entry.operation === 'translate' || entry.operation === 'override';
+      const currentHash = canonicalHash.get(entry.blockId);
+      if (tracks && entry.sourceHash && currentHash
+        && entry.sourceHash !== currentHash && !staleBlockIds.has(entry.blockId)) {
+        findings.push({
+          locale,
+          canonicalId: canonical.id,
+          kind: 'stale',
           severity: 'warning',
-          detail: `Stored variant for ${locale} diverges from canonical + layers`,
+          detail: `${entry.layer} for ${entry.blockId} in ${locale} was authored against an older ${canonical.id} — needs redoing`,
+          blockId: entry.blockId,
           detectedAt,
         });
       }
-    }
+    });
   });
 
   return findings;

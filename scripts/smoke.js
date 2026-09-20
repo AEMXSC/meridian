@@ -45,7 +45,6 @@ function check(label, cond, detail = '') {
   }
 }
 const heading = (t) => process.stdout.write(`\n${t}\n`);
-const note = (t) => process.stdout.write(`  · ${t}\n`);
 
 function memStore(canonicalRef, layers) {
   const live = new Map();
@@ -65,11 +64,11 @@ function memStore(canonicalRef, layers) {
 const block = async (id, type, content) => ({
   id, type, content, hash: await hashBlockContent(type, content),
 });
-const translate = (blockId, value, confidence = 0.95) => ({
-  blockId, layer: 'language', operation: 'translate', value, reason: 'localized', provenance: 'agent', confidence, status: 'auto-applied',
+const translate = (blockId, value, confidence, sourceHash) => ({
+  blockId, layer: 'language', operation: 'translate', value, reason: 'localized', provenance: 'agent', confidence, status: 'auto-applied', sourceHash,
 });
-const override = (blockId, layer, value, status = 'human-owned') => ({
-  blockId, layer, operation: 'override', value, reason: 'market override', provenance: 'human', confidence: null, status,
+const override = (blockId, layer, value, status, sourceHash) => ({
+  blockId, layer, operation: 'override', value, reason: 'market override', provenance: 'human', confidence: null, status, sourceHash,
 });
 
 async function run() {
@@ -84,26 +83,29 @@ async function run() {
     ],
   };
 
+  const heroHash = canonV1.blocks[0].hash;
+  const priceHash = canonV1.blocks[1].hash;
+  const legalHash = canonV1.blocks[2].hash;
   const layers = new Map([
     // en_us: inherits everything → pure mirror of the master.
     ['en_us', { locale: 'en_us', canonicalId: canonV1.id, entries: [] }],
     // en_gb: INHERITS hero (syncs), OVERRIDES price. The "edit one part, keep
     // the rest in sync" market.
-    ['en_gb', { locale: 'en_gb', canonicalId: canonV1.id, entries: [override('price', 'commercial', { amount: '10 GBP' })] }],
+    ['en_gb', { locale: 'en_gb', canonicalId: canonV1.id, entries: [override('price', 'commercial', { amount: '10 GBP' }, 'human-owned', priceHash)] }],
     // de_de: translates hero, keeps EUR price + DE legal. Compliance present.
     ['de_de', {
       locale: 'de_de',
       canonicalId: canonV1.id,
       entries: [
-        translate('hero', { heading: 'Frühlingsangebot' }),
-        override('price', 'commercial', { amount: '10 EUR' }),
-        override('legal', 'compliance', { text: 'Pflichtangabe.' }, 'human-owned-nonnegotiable'),
+        translate('hero', { heading: 'Frühlingsangebot' }, 0.95, heroHash),
+        override('price', 'commercial', { amount: '10 EUR' }, 'human-owned', priceHash),
+        override('legal', 'compliance', { text: 'Pflichtangabe.' }, 'human-owned-nonnegotiable', legalHash),
       ],
     }],
     // fr_fr: requires compliance, has none → must be blocked.
-    ['fr_fr', { locale: 'fr_fr', canonicalId: canonV1.id, entries: [translate('hero', { heading: 'Offre de printemps' })] }],
+    ['fr_fr', { locale: 'fr_fr', canonicalId: canonV1.id, entries: [translate('hero', { heading: 'Offre de printemps' }, 0.95, heroHash)] }],
     // es_mx: low-confidence hero translation → taste queue on a hero change.
-    ['es_mx', { locale: 'es_mx', canonicalId: canonV1.id, entries: [translate('hero', { heading: 'Ofertas de primavera' }, 0.5)] }],
+    ['es_mx', { locale: 'es_mx', canonicalId: canonV1.id, entries: [translate('hero', { heading: 'Ofertas de primavera' }, 0.5, heroHash)] }],
     // ja_jp: forks hero (bespoke), inherits the rest.
     ['ja_jp', {
       locale: 'ja_jp',
@@ -177,7 +179,11 @@ async function run() {
   check('es_mx routed to review', gated.es_mx === 'review');
   check('es_mx is in the taste queue, not auto-published', store.queue.has('es_mx'));
 
-  check('clean auto-published set is exactly en_us, en_gb, de_de, ja_jp', applied.join() === 'de_de,en_gb,en_us,ja_jp', applied.join());
+  check('inheriting + forked markets auto-publish (en_us, en_gb, ja_jp)', applied.join() === 'en_gb,en_us,ja_jp', applied.join());
+
+  heading('JOB 5b  Source-change re-translation — de_de translated the hero, so a text launch routes it to review');
+  check('de_de routed to review (not auto-publishing the outdated German)', gated.de_de === 'review', JSON.stringify(res.gated));
+  check('de_de did NOT auto-publish stale German to the edge', store.live.get('de_de').blocks.find((b) => b.id === 'hero').content.heading === 'Frühlingsangebot' && store.queue.has('de_de'));
 
   // ==== Rollback ===========================================================
   heading('JOB 6  Roll back the launch — one action restores the edge');
@@ -223,9 +229,10 @@ async function run() {
     proposal.requiredLayers.includes('language') && proposal.requiredLayers.includes('compliance') && !proposal.requiredLayers.includes('commercial'),
   );
 
-  // ==== FINDINGS / OBSERVATIONS (not pass/fail) ============================
-  heading('FINDINGS  (behaviors worth a product decision, not test failures)');
-  const deHeroPost = materialize(canonV2, layers.get('de_de'), 'de_de').blocks.find((b) => b.id === 'hero');
+  // ==== Source-staleness (the earlier gap, now fixed both ways) =============
+  heading('JOB 10  Stale-source translation is caught — exposure flags it AND a launch never auto-ships it');
+  // Even if de_de's old translation were somehow re-stamped onto /live, a scan
+  // against the new master flags it via the entry's sourceHash.
   const dePostFindings = scanExposure({
     canonical: canonV2,
     policies: [{ locale: 'de_de', requiredLayers: ['compliance'] }],
@@ -233,13 +240,9 @@ async function run() {
     stored: new Map([['de_de', materialize(canonV2, layers.get('de_de'), 'de_de')]]),
     now: '2026-09-20T00:00:00Z',
   });
-  const flaggedStale = dePostFindings.some((f) => f.kind === 'stale');
-  note(`de_de hero after rollout = "${deHeroPost.content.heading}" (its translation is HELD — English text does not leak in).`);
-  note(`de_de hero derivedFrom is re-stamped to the NEW canonical hash; exposure flags it stale afterward? ${flaggedStale ? 'YES' : 'NO'}.`);
-  note('GAP: a high-confidence translate entry on a changed block auto-republishes the OLD translation and clears the');
-  note('     stale flag — so a text launch is not re-translated and is not re-flagged. Low-confidence ones DO queue.');
-  note('FIX OPTIONS: (a) record sourceHash on translate/override entries and flag when it != current canonical hash;');
-  note('     (b) gate a translate entry on a changed block to "review" regardless of stored confidence (needs re-translation).');
+  const heroStale = dePostFindings.find((f) => f.kind === 'stale' && f.blockId === 'hero');
+  check('exposure flags de_de hero as source-stale (needs re-translation)', Boolean(heroStale), JSON.stringify(dePostFindings.map((f) => `${f.kind}:${f.blockId ?? ''}`)));
+  check('the de_de legal override (source unchanged) is NOT flagged', !dePostFindings.some((f) => f.kind === 'stale' && f.blockId === 'legal'));
 
   heading('════════════════════════════════════════════');
   process.stdout.write(`RESULT: ${pass} passed, ${fail} failed\n`);

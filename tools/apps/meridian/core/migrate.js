@@ -24,7 +24,7 @@
 import { hashBlockContent, stableStringify } from './hash.js';
 import createClassifier from './classify.js';
 
-function buildEntry(block, layer, operation) {
+function buildEntry(block, layer, operation, sourceHash) {
   const entry = {
     blockId: block.id,
     layer,
@@ -40,6 +40,9 @@ function buildEntry(block, layer, operation) {
   // Carry the real block type on an insert so the migrated market-only block
   // renders as its true component, not the layer name.
   if (operation === 'insert') entry.type = block.type;
+  // Record what this value was authored against, so a later source change flags
+  // it for redoing (translate/override track canonical; inserts have no source).
+  if (sourceHash) entry.sourceHash = sourceHash;
   return entry;
 }
 
@@ -99,6 +102,7 @@ export default async function ingestMsm(input, opts = {}) {
   };
 
   const sourceById = new Map(source.blocks.map((b) => [b.id, b]));
+  const hashById = new Map(blocks.map((b) => [b.id, b.hash]));
   const layers = new Map();
   const policies = [];
 
@@ -115,7 +119,7 @@ export default async function ingestMsm(input, opts = {}) {
       if (stableStringify(sb.content) !== stableStringify(mb.content)) {
         const { layer } = classify(mb);
         const operation = layer === 'language' ? 'translate' : 'override';
-        entries.push(buildEntry(mb, layer, operation));
+        entries.push(buildEntry(mb, layer, operation, hashById.get(mb.id)));
       }
       // identical → inherited from canonical, no entry authored
     });

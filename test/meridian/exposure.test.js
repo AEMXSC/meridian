@@ -104,6 +104,62 @@ test('a structurally forked block is not reported stale when canonical moves', (
   assert.equal(findings.filter((f) => f.kind === 'drift').length, 0, 'and not drift either');
 });
 
+test('source-stale: a translation authored against an older canonical hash is flagged', () => {
+  const canonical = {
+    id: 'c',
+    title: 't',
+    updated: NOW,
+    blocks: [{
+      id: 'hero', type: 'hero', content: { h: 'v2' }, hash: 'hash-new',
+    }],
+  };
+  const layer = {
+    locale: 'de_de',
+    canonicalId: 'c',
+    entries: [{
+      blockId: 'hero', layer: 'language', operation: 'translate', value: { h: 'alt' }, reason: 'r', provenance: 'agent', confidence: 0.95, status: 'auto-applied', sourceHash: 'hash-OLD',
+    }],
+  };
+  const findings = scanExposure({
+    canonical, policies: [{ locale: 'de_de', requiredLayers: [] }], layers: new Map([['de_de', layer]]), stored: new Map(), now: NOW,
+  });
+  const stale = findings.filter((f) => f.kind === 'stale');
+  assert.equal(stale.length, 1);
+  assert.equal(stale[0].blockId, 'hero');
+  assert.equal(stale[0].severity, 'warning', 'source-stale is a warning, not a hard critical');
+});
+
+test('source-stale does not double-report a block already stale in the stored variant', () => {
+  const canonical = {
+    id: 'c',
+    title: 't',
+    updated: NOW,
+    blocks: [{
+      id: 'hero', type: 'hero', content: {}, hash: 'new',
+    }],
+  };
+  const layer = {
+    locale: 'de_de',
+    canonicalId: 'c',
+    entries: [{
+      blockId: 'hero', layer: 'language', operation: 'translate', value: {}, reason: 'r', provenance: 'a', confidence: 0.95, status: 'auto-applied', sourceHash: 'old',
+    }],
+  };
+  const stored = new Map([['de_de', {
+    locale: 'de_de',
+    canonicalId: 'c',
+    blocks: [{
+      id: 'hero', type: 'hero', content: {}, derivedFrom: 'old',
+    }],
+  }]]);
+  const findings = scanExposure({
+    canonical, policies: [{ locale: 'de_de', requiredLayers: [] }], layers: new Map([['de_de', layer]]), stored, now: NOW,
+  });
+  const stale = findings.filter((f) => f.kind === 'stale');
+  assert.equal(stale.length, 1, 'exactly one stale finding, not two');
+  assert.equal(stale[0].severity, 'critical', 'the stored-variant stale wins');
+});
+
 test('low-confidence: an auto-applied block below threshold is flagged', () => {
   const canonical = {
     id: 'c', title: 't', updated: NOW, blocks: [],

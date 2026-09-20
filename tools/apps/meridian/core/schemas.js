@@ -55,6 +55,10 @@
  * @property {LayerStatus} status
  * @property {string} [type] - block type for an `insert` of a market-only block,
  *   so the derived block renders as its real component (not the layer name)
+ * @property {string} [sourceHash] - the canonical block hash this entry was
+ *   authored/translated against. When it differs from the current canonical
+ *   hash, the localized value is of outdated source: exposure flags it and
+ *   propagation routes it to review (needs re-doing). PRD §5 staleness.
  */
 
 /**

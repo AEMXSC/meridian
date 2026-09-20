@@ -36,6 +36,17 @@ function gate(layer, requiredLayers, changedBlockIds, scorer, threshold) {
   const languageChanged = (layer?.entries ?? []).filter(
     (e) => e.layer === 'language' && changed.has(e.blockId),
   );
+  // A translation whose source block just changed and that records what it was
+  // translated from (sourceHash) is by definition outdated — never auto-publish
+  // the prior translation on a source change; route it to re-translation. (A
+  // real translator would re-derive, then the scorer below gates the NEW value.)
+  const sourceMoved = languageChanged.filter((e) => e.sourceHash);
+  if (sourceMoved.length > 0) {
+    return {
+      gate: 'review',
+      reason: `Source changed under ${sourceMoved.map((e) => e.blockId).join(', ')} — needs re-translation`,
+    };
+  }
   const lowest = languageChanged.reduce(
     (min, e) => Math.min(min, scorer(e)),
     Number.POSITIVE_INFINITY,

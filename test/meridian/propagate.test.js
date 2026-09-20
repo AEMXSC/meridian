@@ -77,6 +77,31 @@ test('a low-confidence language block is gated for review, not published', async
   assert.ok(!store.live.has('es_mx'), 'es_mx did not reach the edge');
 });
 
+test('a translation whose source changed is gated for review even at high confidence', async () => {
+  const canonical = {
+    id: 'canon/x',
+    title: 'x',
+    updated: NOW,
+    blocks: [{
+      id: 'hero', type: 'hero', content: { h: 'v2' }, hash: 'new',
+    }],
+  };
+  const layer = {
+    locale: 'de_de',
+    canonicalId: 'canon/x',
+    entries: [{
+      blockId: 'hero', layer: 'language', operation: 'translate', value: { h: 'alt' }, reason: 'r', provenance: 'agent', confidence: 0.99, status: 'auto-applied', sourceHash: 'old',
+    }],
+  };
+  const store = fakeStore();
+  const policies = [{ locale: 'de_de', requiredLayers: [] }];
+  const plan = planPropagation(canonical, ['hero'], policies);
+  const result = await applyPropagation(store, canonical, plan, { layers: new Map([['de_de', layer]]), policies, now: NOW });
+  const de = result.gated.find((g) => g.locale === 'de_de');
+  assert.ok(de && de.gate === 'review', 'source-changed translation routed to review, not auto');
+  assert.ok(!store.live.has('de_de'), 'the outdated translation was not auto-published');
+});
+
 test('a market with no layer + no compliance requirement stamps its real locale', async () => {
   const canonical = {
     id: 'canon/x',

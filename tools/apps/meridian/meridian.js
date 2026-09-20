@@ -382,6 +382,13 @@ class MeridianApp extends LitElement {
       confidence: null,
       status: effectiveLayer === 'compliance' ? 'human-owned-nonnegotiable' : 'human-owned',
     };
+    // Record the canonical block hash this value was authored against, so a
+    // later master change flags it for redoing (translate/override track the
+    // source; insert/fork/remove don't).
+    if (operation === 'translate' || operation === 'override') {
+      const src = this._canonical?.blocks.find((b) => b.id === blockId);
+      if (src?.hash) entry.sourceHash = src.hash;
+    }
     const index = Number.isInteger(this._editing?.index) ? this._editing.index : null;
     await this.writeEntry(locale, entry, index);
   }
