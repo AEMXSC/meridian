@@ -17,7 +17,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  canonPath, adaptPath, livePath, queuePath, rejectionPath,
+  canonPath, adaptPath, livePath, queuePath, rejectionPath, assertSiteRef,
 } from '../../tools/apps/meridian/core/store.js';
 
 const ID = 'canon/offers/spring-refresh';
@@ -39,4 +39,12 @@ test('path builders reject traversal and malformed segments', () => {
   assert.throws(() => livePath('/meridian', 'es_mx', 'canon/../secret'), /Unsafe canonicalId/);
   assert.throws(() => rejectionPath('/meridian', '../etc', ID), /Unsafe locale/);
   assert.throws(() => rejectionPath('/meridian', 'es_mx', 'canon/../secret'), /Unsafe canonicalId/);
+});
+
+test('assertSiteRef rejects org/site that could escape the site path', () => {
+  assert.doesNotThrow(() => assertSiteRef('aemxsc', 'citizens'));
+  assert.throws(() => assertSiteRef('../other', 'citizens'), /Unsafe org/);
+  assert.throws(() => assertSiteRef('aemxsc', '../secret'), /Unsafe site/);
+  assert.throws(() => assertSiteRef('aemxsc', 'a/b'), /Unsafe site/);
+  assert.throws(() => assertSiteRef('', 'citizens'), /Unsafe org/);
 });

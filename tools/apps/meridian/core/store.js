@@ -43,6 +43,17 @@ function assertCanonicalId(id) {
   }
 }
 
+// org/site flow straight into admin.da.live URLs; validate them the same way as
+// a path segment so a crafted value (e.g. "../other") can't escape the site.
+export function assertSiteRef(org, site) {
+  if (typeof org !== 'string' || !SAFE_SEGMENT.test(org)) {
+    throw new Error(`Unsafe org: ${JSON.stringify(org)}`);
+  }
+  if (typeof site !== 'string' || !SAFE_SEGMENT.test(site)) {
+    throw new Error(`Unsafe site: ${JSON.stringify(site)}`);
+  }
+}
+
 /** canonicalId always starts with "canon/"; the tail is the path reused under adapt/live. */
 function relPath(canonicalId) {
   return canonicalId.replace(/^canon\//, '');
@@ -87,7 +98,7 @@ export function rejectionPath(base, locale, id) {
 // picker can offer every site in the org — not a hardcoded one. Authenticated
 // through the signed-in user's daFetch. Mirrors config-console's fetchSiteList.
 export async function listSites(org) {
-  if (!org || org.length < 2) return [];
+  if (!org || !SAFE_SEGMENT.test(org)) return [];
   try {
     const resp = await daFetch(`${DA_ORIGIN}/list/${org}/`, { cache: 'no-store' });
     if (!resp.ok) return [];
@@ -107,6 +118,7 @@ export default class DaStore {
   #base;
 
   constructor({ org, site, base = '/meridian' }) {
+    assertSiteRef(org, site);
     this.#org = org;
     this.#site = site;
     this.#base = base.replace(/\/$/, '');

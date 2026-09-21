@@ -16,6 +16,7 @@
 
 import { materialize } from './materialize.js';
 import createScorer, { AUTO_APPLY_THRESHOLD } from './scoring.js';
+import runWithConcurrency, { DEFAULT_CONCURRENCY } from './concurrency.js';
 
 /**
  * @typedef {'auto'|'review'|'blocked'} Gate
@@ -97,6 +98,7 @@ export async function applyPropagation(store, canonical, plan, opts) {
   }
   const {
     layers, policies, scorer = createScorer(), threshold = AUTO_APPLY_THRESHOLD, now,
+    concurrency = DEFAULT_CONCURRENCY,
   } = opts;
   const requiredByLocale = new Map(policies.map((p) => [p.locale, p.requiredLayers]));
   const detectedAt = now ?? new Date().toISOString();
@@ -106,7 +108,9 @@ export async function applyPropagation(store, canonical, plan, opts) {
   const failed = [];
   const snapshot = {};
 
-  await Promise.all(plan.affectedLocales.map(async (locale) => {
+  // Recompute markets with bounded concurrency so a large launch doesn't fire
+  // an unbounded burst of DA writes. Each task isolates its own failure.
+  const tasks = plan.affectedLocales.map((locale) => async () => {
     try {
       const layer = layers.get(locale) ?? null;
       // Pass locale explicitly so a market with no layer still produces a
@@ -142,7 +146,8 @@ export async function applyPropagation(store, canonical, plan, opts) {
       // and strand already-written markets without a rollback snapshot.
       failed.push({ locale, error: e.message });
     }
-  }));
+  });
+  await runWithConcurrency(tasks, concurrency);
 
   return {
     propagationId, applied, gated, failed, snapshot,

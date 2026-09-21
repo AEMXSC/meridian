@@ -23,7 +23,7 @@
 /* eslint-disable import/no-relative-packages */
 // Reuses the sibling app package's validated path builders by design.
 import {
-  canonPath, adaptPath, livePath, queuePath,
+  canonPath, adaptPath, livePath, queuePath, assertSiteRef,
 } from '../../tools/apps/meridian/core/store.js';
 
 const DA_ORIGIN = 'https://admin.da.live';
@@ -72,6 +72,7 @@ async function del(org, site, path) {
  * @param {string} [base]
  */
 export default function nodeStore(org, site, base = '/meridian') {
+  assertSiteRef(org, site);
   return {
     readConfig: () => get(org, site, `${base}/config.json`),
     readCanonical: async (id) => {
