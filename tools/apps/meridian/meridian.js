@@ -653,21 +653,26 @@ class MeridianApp extends LitElement {
 
   renderToolbar() {
     return html`
+      <h2 class="mrd-sr-only">Meridian localization</h2>
       <div class="mrd-toolbar">
-        <h1>Meridian</h1>
-        <form class="mrd-form" @submit=${this.handleSubmit}>
-          <input class="mrd-picker-input" id="org-input" list="mrd-orgs" placeholder="org"
+        <form class="mrd-scope" role="group" aria-label="Site scope" @submit=${this.handleSubmit}>
+          <span class="mrd-scope-label" aria-hidden="true">Site</span>
+          <input class="mrd-scope-input" id="org-input" list="mrd-orgs" placeholder="org"
+            aria-label="Organization"
             value=${this._org} ?disabled=${this._state === 'loading'} @change=${this.onOrgChange} />
           <datalist id="mrd-orgs">
             ${[...new Set(this._recent.map((r) => r.org))].map((o) => html`<option value=${o}></option>`)}
           </datalist>
-          <input class="mrd-picker-input" id="site-input" list="mrd-sites" placeholder="site"
+          <span class="mrd-scope-sep" aria-hidden="true">/</span>
+          <input class="mrd-scope-input" id="site-input" list="mrd-sites" placeholder="site"
+            aria-label="Site"
             value=${this._site} ?disabled=${this._state === 'loading'} />
           <datalist id="mrd-sites">
             ${this.siteSuggestions.map((s) => html`<option value=${s}></option>`)}
           </datalist>
-          <sl-button ?disabled=${this._state === 'loading'} @click=${this.handleSubmit}>Scan</sl-button>
         </form>
+        <sl-button class="mrd-scan primary outline" ?disabled=${this._state === 'loading'}
+          @click=${this.handleSubmit}>Scan</sl-button>
       </div>
       ${this._state === 'ready' ? html`
         <div class="mrd-tabs">
@@ -724,7 +729,7 @@ class MeridianApp extends LitElement {
           </span>
           <span class="mrd-locale">${locale}</span>
           ${this.renderEdge(locale)}
-          ${canDiff ? html`<sl-button class="mrd-diff-btn"
+          ${canDiff ? html`<sl-button class="mrd-diff-btn primary outline"
             ?disabled=${this._loadingDiffs.has(locale)}
             @click=${() => this.toggleDiff(locale)}>
             ${this.diffButtonLabel(locale)}
@@ -776,15 +781,15 @@ class MeridianApp extends LitElement {
             <sl-button ?disabled=${busy || blocked}
               title=${blocked ? 'Compliance absent — cannot publish' : 'Publish to /live'}
               @click=${() => this.approve(item)}>Approve</sl-button>
-            <sl-button ?disabled=${busy} @click=${() => this.startReject(item)}>Reject</sl-button>
+            <sl-button class="negative outline" ?disabled=${busy} @click=${() => this.startReject(item)}>Reject</sl-button>
           </span>
         </div>
         ${rejecting ? html`
           <div class="mrd-reject-form">
             <sl-input class="mrd-reject-input" ?disabled=${busy}
               placeholder="Reason for rejecting ${item.locale}…"></sl-input>
-            <sl-button ?disabled=${busy} @click=${() => this.confirmReject(item)}>Confirm reject</sl-button>
-            <sl-button ?disabled=${busy} @click=${() => this.cancelReject()}>Cancel</sl-button>
+            <sl-button class="negative" ?disabled=${busy} @click=${() => this.confirmReject(item)}>Confirm reject</sl-button>
+            <sl-button class="primary outline" ?disabled=${busy} @click=${() => this.cancelReject()}>Cancel</sl-button>
           </div>` : nothing}
       </div>`;
   }
@@ -801,13 +806,13 @@ class MeridianApp extends LitElement {
     const key = `${locale}:${i}`;
     if (locked && this._confirmKey === key) {
       return html`
-        <sl-button ?disabled=${busy} @click=${() => this.deleteEntry(locale, i)}>Confirm delete</sl-button>
-        <sl-button ?disabled=${busy} @click=${() => { this._confirmKey = ''; }}>Cancel</sl-button>`;
+        <sl-button class="negative" ?disabled=${busy} @click=${() => this.deleteEntry(locale, i)}>Confirm delete</sl-button>
+        <sl-button class="primary outline" ?disabled=${busy} @click=${() => { this._confirmKey = ''; }}>Cancel</sl-button>`;
     }
     if (locked) {
-      return html`<sl-button ?disabled=${busy} @click=${() => { this._confirmKey = key; }}>Delete</sl-button>`;
+      return html`<sl-button class="negative outline" ?disabled=${busy} @click=${() => { this._confirmKey = key; }}>Delete</sl-button>`;
     }
-    return html`<sl-button ?disabled=${busy} @click=${() => this.deleteEntry(locale, i)}>Delete</sl-button>`;
+    return html`<sl-button class="negative outline" ?disabled=${busy} @click=${() => this.deleteEntry(locale, i)}>Delete</sl-button>`;
   }
 
   renderEntry(locale, entry, i) {
@@ -821,8 +826,8 @@ class MeridianApp extends LitElement {
           <span class="mrd-entry-op">${entry.operation}</span>
           ${locked ? html`<span class="mrd-lock" title="Human-owned, non-negotiable">human-only</span>` : nothing}
           <span class="mrd-entry-actions">
-            <sl-button ?disabled=${busy} @click=${() => this.startEdit(locale, i)}>Edit</sl-button>
-            ${entry.operation === 'fork' ? nothing : html`<sl-button ?disabled=${busy} @click=${() => this.startFork(locale, entry.blockId)}>Fork</sl-button>`}
+            <sl-button class="primary outline" ?disabled=${busy} @click=${() => this.startEdit(locale, i)}>Edit</sl-button>
+            ${entry.operation === 'fork' ? nothing : html`<sl-button class="primary outline" ?disabled=${busy} @click=${() => this.startFork(locale, entry.blockId)}>Fork</sl-button>`}
             ${this.renderDelete(locale, i, locked, busy)}
           </span>
         </div>
@@ -865,7 +870,7 @@ class MeridianApp extends LitElement {
         </div>
         <div>
           <label>&nbsp;</label>
-          <sl-button ?disabled=${busy} @click=${() => this.suggestLayer()}>Suggest layer</sl-button>
+          <sl-button class="primary outline" ?disabled=${busy} @click=${() => this.suggestLayer()}>Suggest layer</sl-button>
         </div>
         <div class="mrd-field-wide">
           <label for="af-value">Value (JSON or text)</label>
@@ -877,7 +882,7 @@ class MeridianApp extends LitElement {
         </div>
         ${this._suggest ? html`<div class="mrd-suggest">${this._suggest}</div>` : nothing}
         <div class="mrd-form-actions">
-          <sl-button ?disabled=${busy} @click=${() => this.cancelEdit()}>Cancel</sl-button>
+          <sl-button class="primary outline" ?disabled=${busy} @click=${() => this.cancelEdit()}>Cancel</sl-button>
           <sl-button ?disabled=${busy} @click=${() => this.saveEntry(locale)}>Save adaptation</sl-button>
         </div>
       </div>`;
@@ -906,7 +911,7 @@ class MeridianApp extends LitElement {
     : html`<div class="mrd-empty">No adaptations yet.</div>`}
         ${editingHere
     ? this.renderEntryForm(locale)
-    : html`<sl-button class="mrd-add-entry" @click=${() => this.startAdd(locale)}>Add adaptation</sl-button>`}
+    : html`<sl-button class="mrd-add-entry primary outline" @click=${() => this.startAdd(locale)}>Add adaptation</sl-button>`}
       </div>`;
   }
 
@@ -927,8 +932,8 @@ class MeridianApp extends LitElement {
         <textarea id="lp-intent"
           placeholder="e.g. Add a Quebec French market: translate everything, keep US pricing, and it legally needs a French disclosure."></textarea>
         <div class="mrd-form-actions">
-          <sl-button @click=${() => this.cancelPropose()}>Cancel</sl-button>
-          <sl-button @click=${() => this.propose()}>Propose</sl-button>
+          <sl-button class="primary outline" @click=${() => this.cancelPropose()}>Cancel</sl-button>
+          <sl-button class=${p ? 'primary outline' : ''} @click=${() => this.propose()}>Propose</sl-button>
         </div>
         ${p ? html`
           <div class="mrd-proposal">

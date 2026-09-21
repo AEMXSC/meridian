@@ -23,11 +23,13 @@ like the other apps in `adobe-rnd/aem-apps`. All content it manages is scoped un
 
 ## Install it on your site (any org)
 
-Register the two entries in **your DA site config** (`.da/config.json`, editable via
-DA's "Edit configs", or written directly to `/.da/config.json` in your source). Site
-level covers one site; org level (`.da/config.json` at the org) covers every site in
-the org. Use the hosted build, or vendor the files into your own repo and use
-relative paths.
+Register the two entries in **your DA site config** using DA's built-in **Config**
+editor (the sheet UI — open your site in DA → **Config** → add rows to the `library`
+and `prepare` sheets). This writes DA's config store (`admin.da.live/config/{org}/{site}`),
+which is **not** a source file — editing `.da/config.json` in the content source does
+*not* register anything. Site-level config covers one site; org-level config covers
+every site in the org. Use the hosted build, or vendor the files into your own repo
+and use relative paths.
 
 ### `library` sheet — the full-page app
 

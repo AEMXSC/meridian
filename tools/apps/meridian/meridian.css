@@ -26,6 +26,20 @@
   line-height: 1.4;
 }
 
+/* Visually-hidden heading — gives the component its own heading landmark for
+ * screen readers without duplicating the app name DA's chrome shows visually. */
+.mrd-sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+  border: 0;
+}
+
 /* ---- Toolbar --------------------------------------------------------- */
 .mrd-toolbar {
   display: flex;
@@ -34,33 +48,48 @@
   flex-wrap: wrap;
 }
 
-.mrd-toolbar h1 {
-  font-size: 22px;
-  font-weight: 700;
-  letter-spacing: -0.01em;
-  margin: 0;
-}
-
-.mrd-form {
-  display: flex;
-  gap: var(--mrd-space-100);
+/* Scope control — an ABV-style context selector, not a debug form. The app
+ * name is already shown by DA's dialog chrome, so we don't repeat it here. */
+.mrd-scope {
+  display: inline-flex;
   align-items: center;
+  gap: 6px;
+  padding: 4px 6px 4px 14px;
+  background: var(--mrd-surface-sunken);
+  border: 1px solid var(--mrd-border);
+  border-radius: var(--mrd-radius-pill);
 }
 
-.mrd-picker-input {
+.mrd-scope-label {
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--mrd-text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.mrd-scope-sep {
+  color: var(--mrd-text-muted);
+}
+
+.mrd-scope-input {
   font: inherit;
   font-size: 14px;
-  padding: 5px 12px;
-  border: var(--sl-field-border, 2px solid var(--mrd-border));
-  border-radius: var(--mrd-radius-pill);
+  padding: 4px 8px;
+  border: 1px solid transparent;
+  border-radius: var(--mrd-radius-control);
   background: var(--mrd-surface);
   color: var(--mrd-text);
-  width: 140px;
+  width: 108px;
 }
 
-.mrd-picker-input:focus {
+.mrd-scope-input:focus {
   outline: none;
   border-color: var(--mrd-accent);
+}
+
+.mrd-scan {
+  margin-left: auto;
 }
 
 .nx-alert.warning {
