@@ -129,8 +129,8 @@ class MeridianApp extends LitElement {
     // org/site so a returning author lands where they left off.
     this._org = this._org || (this._recent[0]?.org ?? '');
     this._site = this._site || (this._recent[0]?.site ?? '');
-    if (this._org && this._site) this.scan();
-    else if (this._org) this.loadSites();
+    // Scan is triggered by init() once the DA session is (or isn't) available —
+    // not here — so the toolbar always renders even without a DA context.
   }
 
   // Recent org/site pairs, persisted in localStorage so the picker can suggest
@@ -977,10 +977,33 @@ customElements.define('meridian-app', MeridianApp);
 
 (async function init() {
   const deepLink = parseDeepLink();
-  const { context } = await DA_SDK;
   const cmp = document.createElement('meridian-app');
-  cmp.context = context;
-  cmp._org = deepLink.org || context.org || '';
-  cmp._site = deepLink.site || context.site || context.repo || '';
+  cmp._org = deepLink.org || '';
+  cmp._site = deepLink.site || '';
+  // Render the UI first so the page is never blank. DA_SDK only resolves when
+  // running inside da.live (it injects context + auth via postMessage); opened
+  // standalone it never resolves, so race it with a timeout.
   document.body.append(cmp);
+
+  let sdk = null;
+  try {
+    sdk = await Promise.race([
+      DA_SDK,
+      new Promise((resolve) => { setTimeout(() => resolve(null), 4000); }),
+    ]);
+  } catch {
+    sdk = null;
+  }
+
+  if (sdk && sdk.context) {
+    cmp.context = sdk.context;
+    cmp._org = cmp._org || sdk.context.org || '';
+    cmp._site = cmp._site || sdk.context.site || sdk.context.repo || '';
+    if (cmp._org && cmp._site) cmp.scan();
+    else if (cmp._org) cmp.loadSites();
+  } else {
+    // No DA session (opened standalone). Render, but be clear reads/writes need
+    // DA auth — the app must run inside DA (Library or Prepare menu).
+    cmp._error = 'Meridian needs a DA session. Open it from within DA — a citizens page → Library or Prepare menu — so it can authenticate. Opened standalone it can render but cannot read or write DA content.';
+  }
 }());
