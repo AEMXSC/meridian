@@ -24,6 +24,7 @@ import { materialize } from './core/materialize.js';
 import createClassifier from './core/classify.js';
 import createArchitect from './core/propose.js';
 import { readSheet } from './core/da-config.js';
+import runWithConcurrency from './core/concurrency.js';
 import { LAYER_PRECEDENCE } from './core/schemas.js';
 import { icon } from '../msm/core/icons.js';
 import 'https://da.live/nx/public/sl/components.js';
@@ -95,6 +96,7 @@ class MeridianApp extends LitElement {
     _sites: { state: true },
     _recent: { state: true },
     _translate: { state: true },
+    _edge: { state: true },
   };
 
   connectedCallback() {
@@ -122,6 +124,7 @@ class MeridianApp extends LitElement {
     this._recent = this.loadRecent();
     this._sites = [];
     this._translate = null;
+    this._edge = new Map();
     // Deep-link / editor context wins; otherwise fall back to the most recent
     // org/site so a returning author lands where they left off.
     this._org = this._org || (this._recent[0]?.org ?? '');
@@ -188,6 +191,7 @@ class MeridianApp extends LitElement {
       this.loadQueue();
       this.loadAdaptations();
       this.loadTranslate();
+      this.loadEdgeStatus();
     } catch (e) {
       console.error(e);
       this._error = e.message || 'Scan failed.';
@@ -301,6 +305,23 @@ class MeridianApp extends LitElement {
       console.error('Failed to read DA translate config', e);
       this._translate = null;
     }
+  }
+
+  // Real edge state per market (publish-state), fetched best-effort with bounded
+  // concurrency so a wide site doesn't burst requests. Populates _edge as each
+  // market resolves; failures are skipped (the chip just doesn't show).
+  async loadEdgeStatus() {
+    const policies = this._policies ?? [];
+    const next = new Map();
+    const tasks = policies.map((p) => async () => {
+      try {
+        next.set(p.locale, await this._store.variantEdgeStatus(p.locale, this._canonicalId));
+      } catch (e) {
+        console.error(`Edge status failed for ${p.locale}`, e);
+      }
+    });
+    await runWithConcurrency(tasks);
+    this._edge = next;
   }
 
   get _daLanguages() {
@@ -677,6 +698,15 @@ class MeridianApp extends LitElement {
     </div>`;
   }
 
+  // The real edge state chip (publish-state), once loadEdgeStatus resolves it.
+  renderEdge(locale) {
+    const edge = this._edge.get(locale);
+    if (!edge) return nothing;
+    return html`<span class="mrd-edge" style="color:${edge.color}" title=${`Edge: ${edge.tip}`}>
+      ${icon(edge.name, '0 0 20 20')}
+    </span>`;
+  }
+
   renderMarket([locale, findings]) {
     const status = variantStatus(findings);
     const canDiff = findings.some((f) => f.kind === 'drift' || f.kind === 'stale');
@@ -687,6 +717,7 @@ class MeridianApp extends LitElement {
             ${icon(status.name, '0 0 20 20')}
           </span>
           <span class="mrd-locale">${locale}</span>
+          ${this.renderEdge(locale)}
           ${canDiff ? html`<sl-button class="mrd-diff-btn"
             ?disabled=${this._loadingDiffs.has(locale)}
             @click=${() => this.toggleDiff(locale)}>

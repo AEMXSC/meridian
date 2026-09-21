@@ -23,6 +23,7 @@
 // the DA team's own apps use.
 
 import { daFetch, DA_ORIGIN } from '../../msm/core/fetch.js';
+import { getPageTimestamp, getPageStatus, getStatusConfig } from '../../msm/core/status.js';
 import { upsertRows } from './da-config.js';
 
 // A single path segment: letters, digits, underscore, hyphen. No dots (blocks
@@ -210,6 +211,19 @@ export default class DaStore {
 
   readVariant(locale, canonicalId) {
     return this.#readJson(this.#livePath(locale, canonicalId));
+  }
+
+  // The variant's real edge state (reusing MSM's lag-tolerant publish check):
+  // compares the DA source Last-Modified against AEM preview/live timestamps so
+  // the queue can show what is actually current on the edge, not just whether
+  // the derived hash matches. Returns an { name, color, tip } status config.
+  async variantEdgeStatus(locale, canonicalId) {
+    const path = this.#livePath(locale, canonicalId).replace(/\.json$/, '');
+    const { lastModified } = await getPageTimestamp(this.#org, this.#site, path, 'json');
+    const { previewState, liveState } = await getPageStatus(this.#org, this.#site, path, lastModified, 'json');
+    return getStatusConfig({
+      isDetached: false, outOfSync: false, previewState, liveState,
+    });
   }
 
   writeVariant(variant) {

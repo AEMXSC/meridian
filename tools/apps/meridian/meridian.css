@@ -134,9 +134,14 @@
   margin-bottom: var(--mrd-space-100);
 }
 
-.mrd-market-head .mrd-status svg {
+.mrd-market-head .mrd-status svg,
+.mrd-market-head .mrd-edge svg {
   width: 20px;
   height: 20px;
+}
+
+.mrd-edge {
+  display: inline-flex;
 }
 
 .mrd-locale {
