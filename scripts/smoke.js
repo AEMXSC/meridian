@@ -67,6 +67,7 @@ const block = async (id, type, content) => ({
 const translate = (blockId, value, confidence, sourceHash) => ({
   blockId, layer: 'language', operation: 'translate', value, reason: 'localized', provenance: 'agent', confidence, status: 'auto-applied', sourceHash,
 });
+// status + sourceHash are always passed explicitly by callers below.
 const override = (blockId, layer, value, status, sourceHash) => ({
   blockId, layer, operation: 'override', value, reason: 'market override', provenance: 'human', confidence: null, status, sourceHash,
 });

@@ -33,20 +33,25 @@ function gate(layer, requiredLayers, changedBlockIds, scorer, threshold) {
     return { gate: 'blocked', reason: 'Required compliance layer is absent' };
   }
   const changed = new Set(changedBlockIds);
-  const languageChanged = (layer?.entries ?? []).filter(
-    (e) => e.layer === 'language' && changed.has(e.blockId),
+  const entries = layer?.entries ?? [];
+  // Any held value (translate or override, on ANY layer — language, commercial,
+  // structural, and especially compliance) that was authored against a block
+  // whose source just changed is by definition outdated. Never auto-publish the
+  // prior value on a source change; route it to review. (A real translator would
+  // re-derive the language layers, then the scorer below gates the NEW value.)
+  const sourceMoved = entries.filter(
+    (e) => (e.operation === 'translate' || e.operation === 'override')
+      && e.sourceHash && changed.has(e.blockId),
   );
-  // A translation whose source block just changed and that records what it was
-  // translated from (sourceHash) is by definition outdated — never auto-publish
-  // the prior translation on a source change; route it to re-translation. (A
-  // real translator would re-derive, then the scorer below gates the NEW value.)
-  const sourceMoved = languageChanged.filter((e) => e.sourceHash);
   if (sourceMoved.length > 0) {
     return {
       gate: 'review',
-      reason: `Source changed under ${sourceMoved.map((e) => e.blockId).join(', ')} — needs re-translation`,
+      reason: `Source changed under ${sourceMoved.map((e) => e.blockId).join(', ')} — needs re-review`,
     };
   }
+  const languageChanged = entries.filter(
+    (e) => e.layer === 'language' && changed.has(e.blockId),
+  );
   const lowest = languageChanged.reduce(
     (min, e) => Math.min(min, scorer(e)),
     Number.POSITIVE_INFINITY,

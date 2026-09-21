@@ -129,6 +129,30 @@ test('source-stale: a translation authored against an older canonical hash is fl
   assert.equal(stale[0].severity, 'warning', 'source-stale is a warning, not a hard critical');
 });
 
+test('source-stale on a compliance override is reported critical', () => {
+  const canonical = {
+    id: 'c',
+    title: 't',
+    updated: NOW,
+    blocks: [{
+      id: 'legal', type: 'compliance', content: { text: 'v2' }, hash: 'hash-new',
+    }],
+  };
+  const layer = {
+    locale: 'de_de',
+    canonicalId: 'c',
+    entries: [{
+      blockId: 'legal', layer: 'compliance', operation: 'override', value: { text: 'DE' }, reason: 'r', provenance: 'human:legal', confidence: null, status: 'human-owned-nonnegotiable', sourceHash: 'hash-OLD',
+    }],
+  };
+  const findings = scanExposure({
+    canonical, policies: [{ locale: 'de_de', requiredLayers: ['compliance'] }], layers: new Map([['de_de', layer]]), stored: new Map(), now: NOW,
+  });
+  const stale = findings.find((f) => f.kind === 'stale' && f.blockId === 'legal');
+  assert.ok(stale, 'compliance source-stale flagged');
+  assert.equal(stale.severity, 'critical', 'outdated compliance is critical, not a warning');
+});
+
 test('source-stale does not double-report a block already stale in the stored variant', () => {
   const canonical = {
     id: 'c',

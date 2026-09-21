@@ -102,6 +102,31 @@ test('a translation whose source changed is gated for review even at high confid
   assert.ok(!store.live.has('de_de'), 'the outdated translation was not auto-published');
 });
 
+test('a non-language override whose source changed is also gated for review', async () => {
+  const canonical = {
+    id: 'canon/x',
+    title: 'x',
+    updated: NOW,
+    blocks: [{
+      id: 'price', type: 'commercial', content: { amount: 'v2' }, hash: 'new',
+    }],
+  };
+  const layer = {
+    locale: 'de_de',
+    canonicalId: 'canon/x',
+    entries: [{
+      blockId: 'price', layer: 'commercial', operation: 'override', value: { amount: 'DE' }, reason: 'r', provenance: 'human', confidence: null, status: 'human-owned', sourceHash: 'old',
+    }],
+  };
+  const store = fakeStore();
+  const policies = [{ locale: 'de_de', requiredLayers: [] }];
+  const plan = planPropagation(canonical, ['price'], policies);
+  const result = await applyPropagation(store, canonical, plan, { layers: new Map([['de_de', layer]]), policies, now: NOW });
+  const de = result.gated.find((g) => g.locale === 'de_de');
+  assert.ok(de && de.gate === 'review', 'commercial override with moved source routed to review');
+  assert.ok(!store.live.has('de_de'), 'stale override not auto-published');
+});
+
 test('a market with no layer + no compliance requirement stamps its real locale', async () => {
   const canonical = {
     id: 'canon/x',

@@ -157,7 +157,9 @@ export default function scanExposure(input) {
           locale,
           canonicalId: canonical.id,
           kind: 'stale',
-          severity: 'warning',
+          // A compliance value drifting from its source is as serious as a
+          // missing one (both critical); other layers are a warning.
+          severity: entry.layer === 'compliance' ? 'critical' : 'warning',
           detail: `${entry.layer} for ${entry.blockId} in ${locale} was authored against an older ${canonical.id} — needs redoing`,
           blockId: entry.blockId,
           detectedAt,
