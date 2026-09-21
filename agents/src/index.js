@@ -67,6 +67,7 @@ const TOOLS = [
       properties: {
         ...orgSite,
         plan: { type: 'object', description: 'A plan from meridian_propagation_plan' },
+        publish: { type: 'boolean', description: 'When true, also preview+publish auto-applied variants to the edge (default false = write to DA source only)' },
       },
       required: ['org', 'site', 'plan'],
     },
@@ -80,6 +81,7 @@ const TOOLS = [
         ...orgSite,
         canonicalId: { type: 'string' },
         snapshot: { type: 'object', description: 'The snapshot object returned by meridian_propagation_apply' },
+        publish: { type: 'boolean', description: 'When true, also restore the edge (re-publish restored variants, unpublish deleted ones)' },
       },
       required: ['org', 'site', 'canonicalId', 'snapshot'],
     },
@@ -145,10 +147,12 @@ async function dispatch(name, args) {
     const config = await requireConfig(store);
     const canonical = await store.readCanonical(config.canonicalId);
     const layers = await loadLayers(store, config.canonicalId, config.policies);
-    return applyPropagation(store, canonical, args.plan, { layers, policies: config.policies });
+    return applyPropagation(store, canonical, args.plan, {
+      layers, policies: config.policies, publish: Boolean(args.publish),
+    });
   }
   if (name === 'meridian_propagation_rollback') {
-    return rollback(store, args.canonicalId, args.snapshot);
+    return rollback(store, args.canonicalId, args.snapshot, { publish: Boolean(args.publish) });
   }
   if (name === 'meridian_locale_propose') {
     return architect(args.intent);

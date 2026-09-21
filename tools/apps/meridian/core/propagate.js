@@ -98,7 +98,7 @@ export async function applyPropagation(store, canonical, plan, opts) {
   }
   const {
     layers, policies, scorer = createScorer(), threshold = AUTO_APPLY_THRESHOLD, now,
-    concurrency = DEFAULT_CONCURRENCY,
+    concurrency = DEFAULT_CONCURRENCY, publish = false,
   } = opts;
   const requiredByLocale = new Map(policies.map((p) => [p.locale, p.requiredLayers]));
   const detectedAt = now ?? new Date().toISOString();
@@ -128,7 +128,19 @@ export async function applyPropagation(store, canonical, plan, opts) {
 
       if (decision.gate === 'auto') {
         await store.writeVariant(variant);
-        applied.push({ locale, blocks: variant.blocks.length });
+        // Optionally push to the edge so the variant is actually live, not just
+        // written to DA source. A publish failure is isolated: the variant is
+        // written, just not yet on the edge (recorded as published:false).
+        let published = false;
+        if (publish && typeof store.publishVariant === 'function') {
+          try {
+            await store.publishVariant(locale, canonical.id);
+            published = true;
+          } catch (e) {
+            failed.push({ locale, error: `written but not published: ${e.message}` });
+          }
+        }
+        applied.push({ locale, blocks: variant.blocks.length, published });
       } else {
         await store.writeQueueItem({
           propagationId,

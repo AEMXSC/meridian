@@ -20,20 +20,30 @@
 // edge to its exact pre-propagation state.
 
 /**
- * @param {{ writeVariant: Function, deleteVariant: Function }} store
+ * @param {object} store - writeVariant/deleteVariant, and optional
+ *   publishVariant/unpublishVariant used when opts.publish is set
  * @param {string} canonicalId
  * @param {Record<string, import('./schemas.js').DerivedVariant|null>} snapshot
+ * @param {{ publish?: boolean }} [opts] - when publish, also restore the edge:
+ *   re-publish restored variants and unpublish deleted ones (best-effort).
  * @returns {Promise<{ restored: string[], deleted: string[] }>}
  */
-export default async function rollback(store, canonicalId, snapshot) {
+export default async function rollback(store, canonicalId, snapshot, opts = {}) {
   const restored = [];
   const deleted = [];
+  const { publish = false } = opts;
   await Promise.all(Object.entries(snapshot).map(async ([locale, prior]) => {
     if (prior) {
       await store.writeVariant(prior);
+      if (publish && typeof store.publishVariant === 'function') {
+        await store.publishVariant(locale, canonicalId).catch(() => {});
+      }
       restored.push(locale);
     } else {
       await store.deleteVariant(locale, canonicalId);
+      if (publish && typeof store.unpublishVariant === 'function') {
+        await store.unpublishVariant(locale, canonicalId).catch(() => {});
+      }
       deleted.push(locale);
     }
   }));

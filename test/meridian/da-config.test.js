@@ -56,6 +56,24 @@ test('writeSheet normalizes an empty single-sheet doc to multi-sheet', () => {
   assert.deepEqual(readSheet(next, 'languages'), [{ locale: 'de_de' }]);
 });
 
+test('writeSheet on a POPULATED single-sheet doc preserves rows and keeps :names clean', () => {
+  // The bug: a pre-existing single-sheet /.da/translate.json must not have its
+  // total/limit/offset/data/:sheetname keys treated as sibling sheets.
+  const populated = {
+    ':type': 'sheet', ':sheetname': 'data', total: 2, limit: 2, offset: 0, data: [{ a: 1 }, { a: 2 }],
+  };
+  const next = writeSheet(populated, 'languages', [{ locale: 'fr_fr' }]);
+  assert.equal(next[':type'], 'multi-sheet');
+  assert.deepEqual(next[':names'].sort(), ['data', 'languages'], ':names has only real sheets');
+  assert.ok(!next[':names'].includes('total') && !next[':names'].includes('offset'), 'no polluted names');
+  assert.deepEqual(readSheet(next, 'data'), [{ a: 1 }, { a: 2 }], 'original rows preserved + readable');
+  assert.deepEqual(readSheet(next, 'languages'), [{ locale: 'fr_fr' }]);
+});
+
+test('upsertRows throws on a falsy keyField (never collapse a sheet to one row)', () => {
+  assert.throws(() => upsertRows(null, 'languages', [{ a: 1 }], undefined), /keyField/);
+});
+
 test('upsertRows replaces by key and appends new keys, preserving siblings', () => {
   const doc = {
     ':type': 'multi-sheet',

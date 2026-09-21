@@ -223,13 +223,19 @@ class MeridianApp extends LitElement {
     this._queueBusy = new Set(this._queueBusy).add(key);
     try {
       await this._store.writeVariant(item.variant);
-      // The variant is now live. Clearing the queue entry is a separate write;
-      // if it fails the content is already published, so report that distinctly
-      // from a publish failure and note that re-approving is safe (idempotent).
+      // Push it to the edge so approving actually publishes (not just writes DA
+      // source). Best-effort: a publish failure leaves it written but not live.
+      try {
+        await this._store.publishVariant(item.locale, item.canonicalId);
+      } catch (e) {
+        this._error = `Wrote ${item.locale} to DA but could not publish to the edge: ${e.message}`;
+      }
+      // Clearing the queue entry is a separate write; if it fails the content is
+      // already written, so report that distinctly and note re-approving is safe.
       try {
         await this._store.removeQueueItem(item.locale, item.canonicalId);
       } catch (e) {
-        this._error = `Published ${item.locale} to /live, but could not clear its queue entry (${e.message}). Re-approving is safe.`;
+        this._error = `Published ${item.locale}, but could not clear its queue entry (${e.message}). Re-approving is safe.`;
       }
       await Promise.all([this.loadQueue(), this.scan()]);
     } catch (e) {

@@ -54,15 +54,24 @@ function sheetBlock(rows) {
  */
 export function writeSheet(doc, name, rows) {
   const base = (doc && typeof doc === 'object' && !Array.isArray(doc)) ? doc : {};
-  const reserved = new Set([':type', ':names', ':version']);
   const next = {};
-  // Copy existing sheet blocks (skip reserved meta and the sheet we're replacing).
-  Object.keys(base).forEach((key) => {
-    if (!reserved.has(key) && key !== name) next[key] = base[key];
-  });
+  if (base[':type'] === 'multi-sheet') {
+    // Copy existing sheet blocks (skip reserved meta and the sheet we're
+    // replacing). Only a genuine multi-sheet doc has sibling sheets — treating a
+    // single-sheet doc's top-level keys (total/limit/offset/data/:sheetname) as
+    // sheets would corrupt :names and lose data.
+    const reserved = new Set([':type', ':names', ':version']);
+    Object.keys(base).forEach((key) => {
+      if (!reserved.has(key) && key !== name) next[key] = base[key];
+    });
+  } else if (Array.isArray(base.data) && base.data.length) {
+    // Legacy single-sheet doc with rows: preserve them under their own sheet
+    // name so the conversion to multi-sheet is lossless.
+    const legacyName = base[':sheetname'] || 'data';
+    if (legacyName !== name) next[legacyName] = sheetBlock(base.data);
+  }
   next[name] = sheetBlock(rows);
-  const names = Object.keys(next);
-  next[':names'] = names;
+  next[':names'] = Object.keys(next);
   next[':type'] = 'multi-sheet';
   next[':version'] = base[':version'] ?? 3;
   return next;
@@ -78,6 +87,7 @@ export function writeSheet(doc, name, rows) {
  * @returns {object}
  */
 export function upsertRows(doc, name, rows, keyField) {
+  if (!keyField) throw new Error('upsertRows requires a keyField');
   const existing = readSheet(doc, name);
   const byKey = new Map(existing.map((r) => [r[keyField], r]));
   rows.forEach((r) => byKey.set(r[keyField], { ...byKey.get(r[keyField]), ...r }));

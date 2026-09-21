@@ -22,8 +22,9 @@
 // requests are authenticated against the signed-in DA user — the same client
 // the DA team's own apps use.
 
-import { daFetch, DA_ORIGIN } from '../../msm/core/fetch.js';
+import { daFetch, DA_ORIGIN, AEM_ADMIN } from '../../msm/core/fetch.js';
 import { getPageTimestamp, getPageStatus, getStatusConfig } from '../../msm/core/status.js';
+import { previewPage, publishPage } from '../../msm/core/operations.js';
 import { upsertRows } from './da-config.js';
 
 // A single path segment: letters, digits, underscore, hyphen. No dots (blocks
@@ -233,6 +234,30 @@ export default class DaStore {
   async deleteVariant(locale, canonicalId) {
     const resp = await daFetch(this.#sourceUrl(this.#livePath(locale, canonicalId)), { method: 'DELETE' });
     if (!resp.ok && resp.status !== 404) throw new Error(`Delete failed (${resp.status})`);
+  }
+
+  // Push a materialized variant to the edge: preview then publish via AEM Admin,
+  // so "materialize to the edge" is literally true. Throws on failure so the
+  // caller can record it. Reuses MSM's preview/publish primitives.
+  async publishVariant(locale, canonicalId) {
+    const path = this.#livePath(locale, canonicalId).replace(/\.json$/, '');
+    const prev = await previewPage(this.#org, this.#site, path, 'json');
+    if (prev.error) throw new Error(`Preview failed for ${locale}: ${prev.error}`);
+    const pub = await publishPage(this.#org, this.#site, path, 'json');
+    if (pub.error) throw new Error(`Publish failed for ${locale}: ${pub.error}`);
+  }
+
+  // Remove a variant from the edge (used by rollback when a market had no prior
+  // variant). Deletes the live then preview rendition; a 404 is fine (nothing
+  // to remove).
+  async unpublishVariant(locale, canonicalId) {
+    const path = `${this.#livePath(locale, canonicalId).replace(/\.json$/, '')}.json`;
+    const del = async (kind) => {
+      const resp = await daFetch(`${AEM_ADMIN}/${kind}/${this.#org}/${this.#site}/main${path}`, { method: 'DELETE' });
+      if (!resp.ok && resp.status !== 404) throw new Error(`Un${kind === 'live' ? 'publish' : 'preview'} failed for ${locale} (${resp.status})`);
+    };
+    await del('live');
+    await del('preview');
   }
 
   // Taste queue: a gated recompute waiting on human judgement (PRD §6). One

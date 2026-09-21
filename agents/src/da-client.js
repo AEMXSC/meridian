@@ -27,11 +27,30 @@ import {
 } from '../../tools/apps/meridian/core/store.js';
 
 const DA_ORIGIN = 'https://admin.da.live';
+const AEM_ADMIN = 'https://admin.hlx.page';
 
 function authHeader() {
   const t = process.env.DA_TOKEN;
   if (!t) throw new Error('DA_TOKEN environment variable is required (an IMS access token for admin.da.live)');
   return t.startsWith('Bearer ') ? t : `Bearer ${t}`;
+}
+
+// admin.hlx.page for a DA-backed site needs BOTH Authorization and
+// x-content-source-authorization (the IMS token) — either alone → 401.
+function aemHeaders() {
+  const t = process.env.DA_TOKEN || '';
+  const bare = t.replace(/^Bearer /, '');
+  return { Authorization: authHeader(), 'x-content-source-authorization': bare };
+}
+
+async function aemPost(org, site, kind, path) {
+  const res = await fetch(`${AEM_ADMIN}/${kind}/${org}/${site}/main${path}`, { method: 'POST', headers: aemHeaders() });
+  if (!res.ok) throw new Error(`${kind} ${path} failed (${res.status})`);
+}
+
+async function aemDelete(org, site, kind, path) {
+  const res = await fetch(`${AEM_ADMIN}/${kind}/${org}/${site}/main${path}`, { method: 'DELETE', headers: aemHeaders() });
+  if (!res.ok && res.status !== 404) throw new Error(`un-${kind} ${path} failed (${res.status})`);
 }
 
 function sourceUrl(org, site, path) {
@@ -94,5 +113,15 @@ export default function nodeStore(org, site, base = '/meridian') {
       return put(org, site, p, item);
     },
     deleteVariant: (locale, id) => del(org, site, livePath(base, locale, id)),
+    publishVariant: async (locale, id) => {
+      const path = `${livePath(base, locale, id).replace(/\.json$/, '')}.json`;
+      await aemPost(org, site, 'preview', path);
+      await aemPost(org, site, 'live', path);
+    },
+    unpublishVariant: async (locale, id) => {
+      const path = `${livePath(base, locale, id).replace(/\.json$/, '')}.json`;
+      await aemDelete(org, site, 'live', path);
+      await aemDelete(org, site, 'preview', path);
+    },
   };
 }

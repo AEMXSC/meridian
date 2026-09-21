@@ -31,6 +31,7 @@ export const DEFAULT_CONCURRENCY = 5;
  */
 /* eslint-disable no-restricted-syntax, no-await-in-loop */
 export default async function runWithConcurrency(tasks, limit = DEFAULT_CONCURRENCY) {
+  const cap = Math.max(1, limit || DEFAULT_CONCURRENCY);
   const results = [];
   const executing = new Set();
   for (const task of tasks) {
@@ -40,7 +41,7 @@ export default async function runWithConcurrency(tasks, limit = DEFAULT_CONCURRE
     // Promise.race that paces the window (results still settle truthfully).
     const done = p.catch(() => {}).then(() => { executing.delete(done); });
     executing.add(done);
-    if (executing.size >= limit) await Promise.race(executing);
+    if (executing.size >= cap) await Promise.race(executing);
   }
   return Promise.allSettled(results);
 }

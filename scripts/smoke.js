@@ -49,6 +49,7 @@ const heading = (t) => process.stdout.write(`\n${t}\n`);
 function memStore(canonicalRef, layers) {
   const live = new Map();
   const queue = new Map();
+  const published = new Set();
   return {
     readCanonical: async () => canonicalRef.value,
     readLayer: async (loc) => layers.get(loc) ?? null,
@@ -56,8 +57,10 @@ function memStore(canonicalRef, layers) {
     writeVariant: async (v) => { live.set(v.locale, v); },
     deleteVariant: async (loc) => { live.delete(loc); },
     writeQueueItem: async (it) => { queue.set(it.locale, it); },
+    publishVariant: async (loc) => { published.add(loc); },
     live,
     queue,
+    published,
   };
 }
 
@@ -145,7 +148,9 @@ async function run() {
   check('plan targets only the changed block', plan.changedBlockIds.join() === 'hero');
   check('plan marks every market affected', plan.affectedLocales.length === 6);
 
-  const res = await applyPropagation(store, canonV2, plan, { layers, policies, now: '2026-09-20T00:00:00Z' });
+  const res = await applyPropagation(store, canonV2, plan, {
+    layers, policies, now: '2026-09-20T00:00:00Z', publish: true,
+  });
   const applied = res.applied.map((a) => a.locale).sort();
   const gated = Object.fromEntries(res.gated.map((g) => [g.locale, g.gate]));
   const heroOf = (loc) => store.live.get(loc)?.blocks.find((b) => b.id === 'hero')?.content.heading;
@@ -155,6 +160,13 @@ async function run() {
     'inheriting markets took the master change (en_us, en_gb show 20%)',
     heroOf('en_us').includes('20%') && heroOf('en_gb').includes('20%'),
     `en_us="${heroOf('en_us')}" en_gb="${heroOf('en_gb')}"`,
+  );
+  const allPublished = res.applied.length > 0
+    && res.applied.every((a) => a.published && store.published.has(a.locale));
+  check(
+    'auto-applied markets were published to the edge (publish:true)',
+    allPublished,
+    JSON.stringify(res.applied),
   );
 
   // ==== Edit one part, keep the rest in sync ================================

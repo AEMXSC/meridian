@@ -127,6 +127,56 @@ test('a non-language override whose source changed is also gated for review', as
   assert.ok(!store.live.has('de_de'), 'stale override not auto-published');
 });
 
+test('publish:true pushes auto-applied variants to the edge and flags published', async () => {
+  const { canonical, policies, layers } = await buildFixture();
+  const store = fakeStore();
+  const published = [];
+  store.publishVariant = async (locale) => { published.push(locale); };
+  const plan = planPropagation(canonical, ['hero'], policies);
+  const result = await applyPropagation(store, canonical, plan, {
+    layers, policies, now: NOW, publish: true,
+  });
+  assert.ok(result.applied.length > 0);
+  assert.ok(result.applied.every((a) => a.published === true), 'all auto-applied flagged published');
+  assert.equal(published.length, result.applied.length, 'each auto-applied market published once');
+});
+
+test('a publish failure is isolated: variant is written, recorded, not fatal', async () => {
+  const { canonical, policies, layers } = await buildFixture();
+  const store = fakeStore();
+  store.publishVariant = async () => { throw new Error('edge boom'); };
+  const plan = planPropagation(canonical, ['hero'], policies);
+  const result = await applyPropagation(store, canonical, plan, {
+    layers, policies, now: NOW, publish: true,
+  });
+  assert.ok(result.applied.every((a) => a.published === false), 'not marked published');
+  assert.ok(result.failed.some((f) => /not published/.test(f.error)), 'publish failure recorded');
+  assert.ok(store.live.size > 0, 'variants still written to DA source');
+});
+
+test('applyPropagation without publish never calls the edge (default off)', async () => {
+  const { canonical, policies, layers } = await buildFixture();
+  const store = fakeStore();
+  let called = 0;
+  store.publishVariant = async () => { called += 1; };
+  const plan = planPropagation(canonical, ['hero'], policies);
+  await applyPropagation(store, canonical, plan, { layers, policies, now: NOW });
+  assert.equal(called, 0, 'publish is opt-in');
+});
+
+test('rollback with publish re-publishes restored and unpublishes deleted', async () => {
+  const id = 'canon/offers/spring-refresh';
+  const prior = { locale: 'en_us', canonicalId: id, blocks: [] };
+  const store = fakeStore(new Map([['en_us', prior]]));
+  const published = [];
+  const unpublished = [];
+  store.publishVariant = async (l) => { published.push(l); };
+  store.unpublishVariant = async (l) => { unpublished.push(l); };
+  await rollback(store, id, { en_us: prior, es_mx: null }, { publish: true });
+  assert.deepEqual(published, ['en_us'], 'restored market re-published');
+  assert.deepEqual(unpublished, ['es_mx'], 'deleted market unpublished');
+});
+
 test('a market with no layer + no compliance requirement stamps its real locale', async () => {
   const canonical = {
     id: 'canon/x',
