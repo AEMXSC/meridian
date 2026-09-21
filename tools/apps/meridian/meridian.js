@@ -23,6 +23,7 @@ import { diffVariants, onlyChanges } from './core/diff.js';
 import { materialize } from './core/materialize.js';
 import createClassifier from './core/classify.js';
 import createArchitect from './core/propose.js';
+import { readSheet } from './core/da-config.js';
 import { LAYER_PRECEDENCE } from './core/schemas.js';
 import { icon } from '../msm/core/icons.js';
 import 'https://da.live/nx/public/sl/components.js';
@@ -93,6 +94,7 @@ class MeridianApp extends LitElement {
     _config: { state: true },
     _sites: { state: true },
     _recent: { state: true },
+    _translate: { state: true },
   };
 
   connectedCallback() {
@@ -119,6 +121,7 @@ class MeridianApp extends LitElement {
     this._config = null;
     this._recent = this.loadRecent();
     this._sites = [];
+    this._translate = null;
     // Deep-link / editor context wins; otherwise fall back to the most recent
     // org/site so a returning author lands where they left off.
     this._org = this._org || (this._recent[0]?.org ?? '');
@@ -184,6 +187,7 @@ class MeridianApp extends LitElement {
       this.saveRecent(this._org, this._site);
       this.loadQueue();
       this.loadAdaptations();
+      this.loadTranslate();
     } catch (e) {
       console.error(e);
       this._error = e.message || 'Scan failed.';
@@ -286,6 +290,25 @@ class MeridianApp extends LitElement {
       console.error('Failed to load adaptations', e);
       this._error = `Could not load adaptations: ${e.message}`;
     }
+  }
+
+  // DA's native localization config (/.da/translate.json). Read best-effort so
+  // the setup surface can show what DA already knows; never blocks the app.
+  async loadTranslate() {
+    try {
+      this._translate = await this._store.readTranslateConfig();
+    } catch (e) {
+      console.error('Failed to read DA translate config', e);
+      this._translate = null;
+    }
+  }
+
+  get _daLanguages() {
+    return readSheet(this._translate, 'languages');
+  }
+
+  get _dntRules() {
+    return readSheet(this._translate, 'dnt-content-rules');
   }
 
   // A market that requires a compliance layer but has none authored is
@@ -506,6 +529,14 @@ class MeridianApp extends LitElement {
       this._policies = policies;
       this._proposal = null;
       this._proposing = false;
+      // Best-effort: register the market in DA's native localization config so
+      // Meridian complements DA's translation. Never blocks activation.
+      try {
+        await this._store.registerLanguage(locale);
+        await this.loadTranslate();
+      } catch (e) {
+        console.error('Could not register language in DA translate config', e);
+      }
       await this.refreshAfterAuthoring();
     } catch (e) {
       this._error = `Activate failed for ${locale}: ${e.message}`;
@@ -850,6 +881,11 @@ class MeridianApp extends LitElement {
     const busy = p && this._adaptBusy.has(p.locale);
     return html`
       <div class="mrd-newmarket">
+        <div class="mrd-da-context">
+          Interoperates with DA localization: ${this._daLanguages.length} language(s),
+          ${this._dntRules.length} do-not-translate rule(s) in this site's .da/translate.json.
+          Activating a market registers its language there too.
+        </div>
         <label for="lp-intent">Describe the market in a sentence</label>
         <textarea id="lp-intent"
           placeholder="e.g. Add a Quebec French market: translate everything, keep US pricing, and it legally needs a French disclosure."></textarea>

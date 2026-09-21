@@ -23,6 +23,7 @@
 // the DA team's own apps use.
 
 import { daFetch, DA_ORIGIN } from '../../msm/core/fetch.js';
+import { upsertRows } from './da-config.js';
 
 // A single path segment: letters, digits, underscore, hyphen. No dots (blocks
 // `..` traversal), no slashes, no empties. Applied to locale and to every
@@ -165,6 +166,28 @@ export default class DaStore {
 
   writeConfig(config) {
     return this.#writeJson(`${this.#base}/config.json`, config);
+  }
+
+  // DA's native localization config (/.da/translate.json) — read so Meridian's
+  // setup surface can show the languages + do-not-translate rules DA already
+  // knows, and register a new market's language there so Meridian complements
+  // DA's built-in translation rather than competing with it. Lives at the site
+  // root (not under the Meridian base). Absent → null.
+  readTranslateConfig() {
+    return this.#readJson('/.da/translate.json');
+  }
+
+  async registerLanguage(locale, name) {
+    const doc = await this.#readJson('/.da/translate.json');
+    // Preserve every sibling sheet (config, dnt-content-rules, …); only upsert
+    // this locale into the languages sheet. Columns follow DA loc convention.
+    const next = upsertRows(
+      doc,
+      'languages',
+      [{ locale, language: name || locale, action: 'translate' }],
+      'locale',
+    );
+    await this.#writeJson('/.da/translate.json', next);
   }
 
   async readCanonical(id) {

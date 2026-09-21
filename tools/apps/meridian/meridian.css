@@ -460,6 +460,15 @@
   box-shadow: var(--mrd-shadow-card);
 }
 
+.mrd-da-context {
+  margin-bottom: 12px;
+  padding: 8px 12px;
+  border-radius: var(--mrd-radius-control);
+  background: var(--mrd-accent-tint);
+  color: var(--mrd-accent-hover);
+  font-size: 12px;
+}
+
 .mrd-newmarket label {
   display: block;
   font-size: 12px;
