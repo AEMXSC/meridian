@@ -1236,7 +1236,8 @@ class MeridianApp extends LitElement {
             </span>`;
   })}`;
     }
-    return html`${LANG_OPTIONS.map(([code, name]) => this.renderChip(code, name))}`;
+    return html`
+      <span class="mrd-lang-row">${LANG_OPTIONS.map(([code, name]) => this.renderChip(code, name))}</span>`;
   }
 
   // The published edge URL of a source (English) page, for the side-by-side preview.
