@@ -1032,11 +1032,17 @@ class MeridianApp extends LitElement {
   // ---- Page tree (browse real site pages instead of typing a path) ---------
   async loadFolder(path) {
     if (!this._org || !this._site) { this._pageError = 'Set org/site first.'; return; }
+    this._pageError = '';
     try {
       const kids = await this.pageStore().listPages(path);
       this._pageTree = new Map(this._pageTree).set(path, kids);
     } catch (e) {
+      // Collapse the folder so it doesn't sit stuck on "Loading…"; the banner
+      // explains why, and re-expanding retries the fetch.
       this._pageError = `Could not list pages: ${e.message}`;
+      const next = new Set(this._pageExpanded);
+      next.delete(path);
+      this._pageExpanded = next;
     }
   }
 
@@ -1342,24 +1348,26 @@ class MeridianApp extends LitElement {
     const kids = this._pageTree.get(path);
     if (!kids) return html`<div class="mrd-tree-note">Loading…</div>`;
     if (!kids.length) return html`<div class="mrd-tree-note">(empty)</div>`;
-    return html`<ul class="mrd-tree-list">${kids.map((n) => this.renderTreeNode(n))}</ul>`;
+    return html`<ul class="mrd-tree-list" role="group">${kids.map((n) => this.renderTreeNode(n))}</ul>`;
   }
 
   renderTreeNode(node) {
     if (node.isFolder) {
       const open = this._pageExpanded.has(node.path);
       return html`
-        <li>
-          <button class="mrd-tree-folder" @click=${() => this.toggleFolder(node.path)}>
-            <span class="mrd-tree-caret">${open ? '▾' : '▸'}</span> ${node.name}
+        <li role="none">
+          <button class="mrd-tree-folder" role="treeitem" aria-expanded=${open}
+            @click=${() => this.toggleFolder(node.path)}>
+            <span class="mrd-tree-caret" aria-hidden="true">${open ? '▾' : '▸'}</span> ${node.name}
           </button>
           ${open ? this.renderTreeLevel(node.path) : nothing}
         </li>`;
     }
     const ref = node.path.replace(/^\/+/, '').replace(/\.html$/, '');
+    const sel = ref === this._pageRef;
     return html`
-      <li>
-        <button class="mrd-tree-page ${ref === this._pageRef ? 'sel' : ''}"
+      <li role="none">
+        <button class="mrd-tree-page ${sel ? 'sel' : ''}" role="treeitem" aria-selected=${sel}
           @click=${() => this.selectPage(node)}>${node.name.replace(/\.html$/, '')}</button>
       </li>`;
   }
@@ -1373,19 +1381,23 @@ class MeridianApp extends LitElement {
         <em>translated</em> page and a <em>localized</em> one.
       </p>
       <div class="mrd-page-form">
-        <label>Page</label>
-        <button class="mrd-page-pick" ?disabled=${this._pageBusy} @click=${() => this.toggleBrowse()}>
-          ${this._pageRef || 'Choose a page…'} <span class="mrd-tree-caret">▾</span>
+        <label id="mrd-page-lbl">Page</label>
+        <button class="mrd-page-pick" aria-labelledby="mrd-page-lbl" aria-haspopup="tree"
+          aria-expanded=${this._browseOpen} ?disabled=${this._pageBusy}
+          @click=${() => this.toggleBrowse()}>
+          ${this._pageRef || 'Choose a page…'} <span class="mrd-tree-caret" aria-hidden="true">▾</span>
         </button>
-        <label>Languages</label>
-        <span class="mrd-lang-chips">
+        <label id="mrd-lang-lbl">Languages</label>
+        <span class="mrd-lang-chips" role="group" aria-labelledby="mrd-lang-lbl">
           ${LANG_OPTIONS.map(([code, name]) => html`
             <button class="mrd-lang-chip ${this._localeSel.has(code) ? 'on' : ''}"
-              title=${name} ?disabled=${this._pageBusy}
+              aria-pressed=${this._localeSel.has(code)} aria-label=${name}
+              ?disabled=${this._pageBusy}
               @click=${() => this.toggleLocale(code)}>${code}</button>`)}
         </span>
       </div>
-      ${this._browseOpen ? html`<div class="mrd-tree">${this.renderTreeLevel('')}</div>` : nothing}
+      ${this._browseOpen ? html`
+        <div class="mrd-tree" role="tree" aria-label="Site pages">${this.renderTreeLevel('')}</div>` : nothing}
       <div class="mrd-page-actions">
         <sl-button class="primary outline" ?disabled=${this._pageBusy}
           @click=${() => this.translatePages()}>Translate &amp; publish</sl-button>
