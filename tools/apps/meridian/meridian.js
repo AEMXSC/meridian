@@ -1534,8 +1534,10 @@ customElements.define('meridian-app', MeridianApp);
     cmp.context = sdk.context;
     cmp._org = cmp._org || sdk.context.org || '';
     cmp._site = cmp._site || sdk.context.site || sdk.context.repo || '';
+    // Always load the org's site list so the picker offers every site — not
+    // just recents — even when we also deep-link straight into one and scan.
+    if (cmp._org) cmp.loadSites();
     if (cmp._org && cmp._site) cmp.scan();
-    else if (cmp._org) cmp.loadSites();
   } else {
     // No DA session (opened standalone). Render, but be clear reads/writes need
     // DA auth — the app must run inside DA (Library or Prepare menu).
