@@ -426,6 +426,52 @@ export default class DaStore {
     return this.#writeJson(tmPath(this.#base, tm.locale), tm);
   }
 
+  // ---- Localization dashboard (coverage matrix over real pages) -------------
+
+  // The locales that have any localized content (folders under {base}/live).
+  async listLocales() {
+    const nodes = await this.listPages(`${this.#base}/live`).catch(() => []);
+    return nodes.filter((n) => n.isFolder).map((n) => n.name);
+  }
+
+  // Every localized page ref under one locale (recursive), site-relative and
+  // without the {base}/live/{locale} prefix or .html.
+  async #localizedRefs(locale) {
+    const base = `${this.#base}/live/${locale}`;
+    const out = [];
+    const walk = async (path) => {
+      const nodes = await this.listPages(path).catch(() => []);
+      await Promise.all(nodes.map((n) => {
+        if (n.isFolder) return walk(n.path);
+        out.push(n.path.slice(base.length + 1).replace(/\.html$/, ''));
+        return null;
+      }));
+    };
+    await walk(base);
+    return out;
+  }
+
+  // The coverage matrix: every localized page (rows) × the given locales
+  // (columns), each cell current / stale / missing. The portfolio "radar".
+  async localizedMatrix(locales) {
+    const refSet = new Set();
+    await Promise.all(locales.map(async (loc) => {
+      assertLocale(loc);
+      (await this.#localizedRefs(loc)).forEach((r) => refSet.add(r));
+    }));
+    const refs = [...refSet].sort();
+    return Promise.all(refs.map(async (ref) => {
+      const clean = assertPageRef(ref);
+      const src = await getPageTimestamp(this.#org, this.#site, `/${clean}`, 'html').catch(() => ({}));
+      const cells = await Promise.all(locales.map(async (loc) => {
+        const path = `${this.#base}/live/${loc}/${clean}`;
+        const ts = await getPageTimestamp(this.#org, this.#site, path, 'html').catch(() => ({}));
+        return { locale: loc, state: pageRiskState(src?.lastModified, ts?.lastModified) };
+      }));
+      return { ref: clean, cells };
+    }));
+  }
+
   // Taste queue: a gated recompute waiting on human judgement (PRD §6). One
   // pending item per locale+canonical, keyed the same way as a live variant.
   writeQueueItem(item) {

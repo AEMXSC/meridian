@@ -55,7 +55,7 @@ try {
 
 // Deep-link org/site so an author arriving from the editor plugin never
 // re-enters context (the annoyance called out in the Experience Workspace demo).
-const TABS = ['exposure', 'taste', 'adapt', 'pages'];
+const TABS = ['overview', 'exposure', 'taste', 'adapt', 'pages'];
 
 // Plain-language one-liners for the jargon-y queue tabs (shown under the tabs).
 const TAB_HELP = {
@@ -76,7 +76,7 @@ function parseDeepLink() {
   return {
     org: (params.get('org') || '').trim(),
     site: (params.get('site') || '').trim(),
-    tab: TABS.includes(tab) ? tab : 'exposure',
+    tab: TABS.includes(tab) ? tab : 'overview',
   };
 }
 
@@ -133,6 +133,9 @@ class MeridianApp extends LitElement {
     _previewOpen: { state: true },
     _pageRisk: { state: true },
     _toast: { state: true },
+    _matrix: { state: true },
+    _matrixLocales: { state: true },
+    _matrixBusy: { state: true },
   };
 
   connectedCallback() {
@@ -173,6 +176,9 @@ class MeridianApp extends LitElement {
     this._previewOpen = new Set();
     this._pageRisk = [];
     this._toast = '';
+    this._matrix = null;
+    this._matrixLocales = [];
+    this._matrixBusy = false;
     this._localizeSource = '';
     this._localizeRef = '';
     // The store a Localize draft was staged against — captured so a later
@@ -729,6 +735,9 @@ class MeridianApp extends LitElement {
       </div>
       ${this._state === 'ready' ? html`
         <div class="mrd-tabs" role="tablist">
+          <button role="tab" aria-selected=${this._tab === 'overview'}
+            class="mrd-tab ${this._tab === 'overview' ? 'active' : ''}"
+            @click=${() => { this._tab = 'overview'; }}>Overview</button>
           <button role="tab" aria-selected=${this._tab === 'exposure'}
             class="mrd-tab ${this._tab === 'exposure' ? 'active' : ''}"
             @click=${() => { this._tab = 'exposure'; }}>Exposure</button>
@@ -1518,9 +1527,80 @@ class MeridianApp extends LitElement {
     `;
   }
 
+  // The localization dashboard: discover localized pages × markets and their
+  // health once, on demand. Guarded so render-triggered loads run only once.
+  async loadMatrix() {
+    if (!this._org || !this._site || this._matrixBusy) return;
+    this._matrixBusy = true;
+    this._error = '';
+    try {
+      const store = this.pageStore();
+      const locales = await store.listLocales();
+      this._matrixLocales = locales;
+      this._matrix = locales.length ? await store.localizedMatrix(locales) : [];
+    } catch (e) {
+      this._error = e.message;
+      this._matrix = [];
+    } finally {
+      this._matrixBusy = false;
+    }
+  }
+
+  renderOverview() {
+    if (this._matrix === null) {
+      if (!this._matrixBusy) this.loadMatrix();
+      return html`<div class="mrd-loading">Loading localization coverage…</div>`;
+    }
+    const locales = this._matrixLocales;
+    if (!locales.length || !this._matrix.length) {
+      return html`<div class="mrd-empty">
+        No localized pages yet — open <strong>Pages</strong> to localize your first page.
+      </div>`;
+    }
+    const cells = this._matrix.flatMap((r) => r.cells);
+    const count = (s) => cells.filter((c) => c.state === s).length;
+    return html`
+      <div class="mrd-summary">
+        <div class="mrd-scorecard mrd-positive">
+          <div class="mrd-score">${this._matrix.length}</div><div class="mrd-score-label">Pages</div>
+        </div>
+        <div class="mrd-scorecard">
+          <div class="mrd-score">${locales.length}</div><div class="mrd-score-label">Markets</div>
+        </div>
+        <div class="mrd-scorecard mrd-warning">
+          <div class="mrd-score">${count('stale')}</div><div class="mrd-score-label">Stale</div>
+        </div>
+        <div class="mrd-scorecard">
+          <div class="mrd-score">${count('missing')}</div><div class="mrd-score-label">Missing</div>
+        </div>
+        <sl-button class="primary outline mrd-matrix-refresh" ?disabled=${this._matrixBusy}
+          @click=${() => this.loadMatrix()}>Refresh</sl-button>
+      </div>
+      <div class="mrd-matrix-wrap">
+        <table class="mrd-matrix">
+          <thead>
+            <tr><th scope="col">Page</th>${locales.map((l) => html`<th scope="col">${l}</th>`)}</tr>
+          </thead>
+          <tbody>
+            ${this._matrix.map((row) => html`
+              <tr>
+                <td class="mrd-matrix-page">
+                  <button class="mrd-matrix-link"
+                    @click=${() => { this._pageRef = row.ref; this._pageRisk = []; this._tab = 'pages'; }}
+                    title="Open in Pages">${row.ref}</button>
+                </td>
+                ${row.cells.map((c) => html`
+                  <td><span class="mrd-risk-chip mrd-risk-${c.state}">${c.state}</span></td>`)}
+              </tr>`)}
+          </tbody>
+        </table>
+      </div>`;
+  }
+
   renderContent() {
     if (this._state === 'init') return nothing;
     if (this._state === 'loading') return html`<div class="mrd-loading">Scanning ${this._org}/${this._site}…</div>`;
+    if (this._tab === 'overview') return this.renderOverview();
     if (this._tab === 'taste') return this.renderTaste();
     if (this._tab === 'adapt') return this.renderAdaptations();
     if (this._tab === 'pages') return this.renderPages();

@@ -781,6 +781,60 @@
   color: var(--mrd-text-muted);
 }
 
+/* Localization dashboard matrix */
+.mrd-matrix-refresh {
+  margin-left: auto;
+  align-self: center;
+}
+
+.mrd-matrix-wrap {
+  overflow-x: auto;
+  border: 1px solid var(--mrd-border);
+  border-radius: var(--mrd-radius-card);
+  box-shadow: var(--mrd-shadow-card);
+  background: var(--mrd-surface);
+}
+
+.mrd-matrix {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 14px;
+}
+
+.mrd-matrix th,
+.mrd-matrix td {
+  padding: 8px 14px;
+  text-align: left;
+  border-bottom: 1px solid var(--mrd-surface-sunken);
+}
+
+.mrd-matrix thead th {
+  font-size: 12px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--mrd-text-muted);
+}
+
+.mrd-matrix tbody tr:last-child td {
+  border-bottom: none;
+}
+
+.mrd-matrix-link {
+  font: inherit;
+  font-weight: 700;
+  padding: 0;
+  border: none;
+  background: none;
+  color: var(--mrd-accent);
+  cursor: pointer;
+  text-align: left;
+}
+
+.mrd-matrix-link:hover {
+  text-decoration: underline;
+}
+
 /* Page tree */
 .mrd-tree {
   margin-bottom: var(--mrd-space-200);
