@@ -1112,11 +1112,12 @@ class MeridianApp extends LitElement {
     this._localizeDrafts = new Map();
     try {
       const source = await ctx.store.readPageHtml(ctx.ref);
+      const dnt = await ctx.store.readDnt().catch(() => []);
       const tasks = ctx.locales.map((locale) => async () => {
         try {
           const tm = await ctx.store.readTm(locale);
           const tmt = createTmTranslator({ tm, translate: ctx.translate });
-          const out = await localizePage(source, tmt.translate, { to: locale });
+          const out = await localizePage(source, tmt.translate, { to: locale, dnt });
           // Learn only the translations that PASSED the quality gate (out.dict),
           // never the flagged ones — TM stores approved translations.
           const learned = new Map([...tmt.learned].filter(([s]) => out.dict.has(s)));
@@ -1159,11 +1160,12 @@ class MeridianApp extends LitElement {
       this._localizeRef = ctx.ref;
       // Bind the draft to the exact store it was staged against.
       this._localizeStore = ctx.store;
+      const dnt = await ctx.store.readDnt().catch(() => []);
       const tasks = ctx.locales.map((locale) => async () => {
         try {
           const tm = await ctx.store.readTm(locale);
           const tmt = createTmTranslator({ tm, translate: ctx.translate });
-          const out = await localizePage(this._localizeSource, tmt.translate, { to: locale });
+          const out = await localizePage(this._localizeSource, tmt.translate, { to: locale, dnt });
           const learned = new Map([...tmt.learned].filter(([s]) => out.dict.has(s)));
           if (learned.size) await this.saveTm(ctx.store, tm, learned, 'mt', locale);
           // Prefill each review field: a low-confidence language segment starts

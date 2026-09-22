@@ -18,7 +18,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
   canonPath, adaptPath, livePath, queuePath, rejectionPath, assertSiteRef,
-  localePagePath, assertPageRef, tmPath,
+  localePagePath, assertPageRef, tmPath, dntTerms,
 } from '../../tools/apps/meridian/core/store.js';
 
 const ID = 'canon/offers/spring-refresh';
@@ -55,6 +55,24 @@ test('localePagePath scopes a localized page under the locale folder', () => {
 test('tmPath scopes translation memory per locale under the base', () => {
   assert.equal(tmPath('/meridian', 'es'), '/meridian/tm/es.json');
   assert.throws(() => tmPath('/meridian', '../etc'), /Unsafe locale/);
+});
+
+test('dntTerms extracts do-not-translate terms from translate.json, tolerant of the column name', () => {
+  assert.deepEqual(dntTerms(null), [], 'no config → no terms');
+  const doc = {
+    ':type': 'multi-sheet',
+    ':names': ['languages', 'dnt-content-rules'],
+    languages: { data: [{ locale: 'es' }] },
+    'dnt-content-rules': {
+      data: [
+        { term: 'Citizens' },
+        { content: 'Quest®' },
+        { term: 'Quest®' },
+        { note: 'ignored-empty', term: '' },
+      ],
+    },
+  };
+  assert.deepEqual(dntTerms(doc), ['Citizens', 'Quest®'], 'deduped, blank-skipped, column-tolerant');
 });
 
 test('assertPageRef rejects traversal and malformed refs', () => {

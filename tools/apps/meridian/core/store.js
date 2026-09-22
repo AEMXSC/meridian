@@ -25,7 +25,7 @@
 import { daFetch, DA_ORIGIN, AEM_ADMIN } from '../../msm/core/fetch.js';
 import { getPageTimestamp, getPageStatus, getStatusConfig } from '../../msm/core/status.js';
 import { previewPage, publishPage } from '../../msm/core/operations.js';
-import { upsertRows } from './da-config.js';
+import { upsertRows, readSheet } from './da-config.js';
 
 // A single path segment: letters, digits, underscore, hyphen. No dots (blocks
 // `..` traversal), no slashes, no empties. Applied to locale and to every
@@ -110,6 +110,27 @@ export function localePagePath(base, locale, ref) {
 export function tmPath(base, locale) {
   assertLocale(locale);
   return `${base}/tm/${locale}.json`;
+}
+
+// Extract do-not-translate terms from DA's localization config
+// (/.da/translate.json `dnt-content-rules` sheet). Pure + tolerant of the
+// column name (DA loc sheets vary): prefer a term-ish column, else the first
+// non-empty string cell in the row. De-duplicated.
+export function dntTerms(translateDoc) {
+  const rows = readSheet(translateDoc, 'dnt-content-rules');
+  const PREFERRED = ['term', 'content', 'text', 'phrase', 'value', 'word', 'name'];
+  const terms = [];
+  rows.forEach((row) => {
+    if (!row || typeof row !== 'object') return;
+    // Respect an explicit term-ish column when the row has one (even if empty —
+    // an empty term means "no term", not "grab some other column"). Only fall
+    // back to the first string cell when no term column is present at all.
+    const hasTermKey = PREFERRED.some((k) => k in row);
+    const pick = PREFERRED.map((k) => row[k]).find((v) => typeof v === 'string' && v.trim())
+      || (hasTermKey ? null : Object.values(row).find((v) => typeof v === 'string' && v.trim()));
+    if (pick) terms.push(pick.trim());
+  });
+  return [...new Set(terms)];
 }
 
 export function queuePath(base, locale, id) {
@@ -220,6 +241,13 @@ export default class DaStore {
   // root (not under the Meridian base). Absent → null.
   readTranslateConfig() {
     return this.#readJson('/.da/translate.json');
+  }
+
+  // The site's do-not-translate terms (brand/legal), read from DA's own loc
+  // config so the quality gate enforces them — a machine translation that alters
+  // a protected term is held for human review, never published. Empty on absence.
+  async readDnt() {
+    return dntTerms(await this.readTranslateConfig());
   }
 
   async registerLanguage(locale, name) {
