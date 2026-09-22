@@ -140,6 +140,22 @@ export async function listSites(org) {
   }
 }
 
+// Shape one raw DA list entry into a page-tree node: { name, path, ext, isFolder }.
+// Pure (no network) so the normalization — extension detection and the
+// folders-have-no-extension rule — is unit-testable without a live DA project.
+// `prefix` is the "/org/site" segment stripped off item.path so the returned
+// path is site-relative (leading slash, no org/site prefix). A folder has no
+// file extension, so ext is '' and isFolder is true.
+export function shapeListNode(item, prefix = '') {
+  const ext = item.ext
+    || (item.name && item.name.includes('.') ? item.name.split('.').pop() : '');
+  let path = item.path || '';
+  if (prefix && path.startsWith(prefix)) path = path.substring(prefix.length) || '/';
+  return {
+    name: item.name, path, ext, isFolder: !ext,
+  };
+}
+
 export default class DaStore {
   #org;
 
@@ -381,6 +397,37 @@ export default class DaStore {
     };
     await walk(`${this.#base}/taste-queue`);
     return items;
+  }
+
+  // Enumerate a site folder for a UI page-tree: the folders and .html pages at
+  // `path` (site-relative, default site root). Uses the DA list API through the
+  // signed-in user's daFetch, mirroring listSites/MSM's listFolder. A 404 means
+  // the folder doesn't exist yet → []; any other non-OK status throws so an
+  // auth/server error is never silently reported as an empty tree (same
+  // 404-vs-error convention as #readJson). Each non-empty path segment is
+  // validated the same way as a page ref so a crafted value can't escape the
+  // site. Results keep only folders and .html pages, folders first then
+  // alphabetical.
+  async listPages(path = '') {
+    const trimmed = typeof path === 'string' ? path.replace(/^\/+/, '').replace(/\/+$/, '') : '';
+    const segs = trimmed ? trimmed.split('/') : [];
+    if (segs.some((seg) => !SAFE_SEGMENT.test(seg))) {
+      throw new Error(`Unsafe path: ${JSON.stringify(path)}`);
+    }
+    const rel = segs.length ? `/${segs.join('/')}` : '';
+    const resp = await daFetch(`${DA_ORIGIN}/list/${this.#org}/${this.#site}${rel}`, { cache: 'no-store' });
+    if (resp.status === 404) return [];
+    if (!resp.ok) throw new Error(`Read failed (${resp.status})`);
+    const items = await resp.json();
+    if (!Array.isArray(items)) return [];
+    const prefix = `/${this.#org}/${this.#site}`;
+    return items
+      .map((item) => shapeListNode(item, prefix))
+      .filter((node) => node.isFolder || node.ext === 'html')
+      .sort((a, b) => {
+        if (a.isFolder !== b.isFolder) return a.isFolder ? -1 : 1;
+        return a.name.localeCompare(b.name);
+      });
   }
 
   // Persist a rejection record so the human's stated reason is auditable even

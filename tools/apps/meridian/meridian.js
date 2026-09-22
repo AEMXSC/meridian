@@ -57,6 +57,13 @@ try {
 // re-enters context (the annoyance called out in the Experience Workspace demo).
 const TABS = ['exposure', 'taste', 'adapt', 'pages'];
 
+// Common target languages offered as quick-pick chips (code + label).
+const LANG_OPTIONS = [
+  ['es', 'Spanish'], ['it', 'Italian'], ['fr', 'French'], ['de', 'German'],
+  ['pt', 'Portuguese'], ['nl', 'Dutch'], ['ja', 'Japanese'], ['zh', 'Chinese'],
+  ['ko', 'Korean'], ['ar', 'Arabic'],
+];
+
 function parseDeepLink() {
   const params = new URLSearchParams(window.location.search);
   const tab = (params.get('tab') || '').trim();
@@ -109,11 +116,14 @@ class MeridianApp extends LitElement {
     _translate: { state: true },
     _edge: { state: true },
     _pageRef: { state: true },
-    _pageLocales: { state: true },
     _pageResults: { state: true },
     _pageBusy: { state: true },
     _pageError: { state: true },
     _localizeDrafts: { state: true },
+    _localeSel: { state: true },
+    _browseOpen: { state: true },
+    _pageTree: { state: true },
+    _pageExpanded: { state: true },
   };
 
   connectedCallback() {
@@ -143,11 +153,14 @@ class MeridianApp extends LitElement {
     this._translate = null;
     this._edge = new Map();
     this._pageRef = 'international-banking';
-    this._pageLocales = 'es, it';
     this._pageResults = new Map();
     this._pageBusy = false;
     this._pageError = '';
     this._localizeDrafts = new Map();
+    this._localeSel = new Set(['es', 'it']);
+    this._browseOpen = false;
+    this._pageTree = new Map();
+    this._pageExpanded = new Set();
     this._localizeSource = '';
     this._localizeRef = '';
     // The store a Localize draft was staged against — captured so a later
@@ -1000,16 +1013,58 @@ class MeridianApp extends LitElement {
   pageInputs() {
     if (!this._org || !this._site) return { error: 'Set org/site first.' };
     const ref = (this._pageRef || '').trim();
-    const locales = [...new Set(
-      (this._pageLocales || '').split(',').map((s) => s.trim()).filter(Boolean),
-    )];
-    if (!ref || !locales.length) return { error: 'Enter a page and at least one locale.' };
-    const store = this._store || new DaStore({ org: this._org, site: this._site });
-    this._store = store;
+    const locales = [...this._localeSel];
+    if (!ref) return { error: 'Choose a page to localize.' };
+    if (!locales.length) return { error: 'Pick at least one target language.' };
+    const store = this.pageStore();
     const translate = createTranslator(daFetch, { org: this._org, site: this._site });
     return {
       ref, locales, store, translate,
     };
+  }
+
+  // A store for the current org/site, reused across browse + run.
+  pageStore() {
+    if (!this._store) this._store = new DaStore({ org: this._org, site: this._site });
+    return this._store;
+  }
+
+  // ---- Page tree (browse real site pages instead of typing a path) ---------
+  async loadFolder(path) {
+    if (!this._org || !this._site) { this._pageError = 'Set org/site first.'; return; }
+    try {
+      const kids = await this.pageStore().listPages(path);
+      this._pageTree = new Map(this._pageTree).set(path, kids);
+    } catch (e) {
+      this._pageError = `Could not list pages: ${e.message}`;
+    }
+  }
+
+  toggleBrowse() {
+    this._browseOpen = !this._browseOpen;
+    if (this._browseOpen && !this._pageTree.has('')) this.loadFolder('');
+  }
+
+  toggleFolder(path) {
+    const next = new Set(this._pageExpanded);
+    if (next.has(path)) next.delete(path);
+    else {
+      next.add(path);
+      if (!this._pageTree.has(path)) this.loadFolder(path);
+    }
+    this._pageExpanded = next;
+  }
+
+  selectPage(node) {
+    this._pageRef = node.path.replace(/^\/+/, '').replace(/\.html$/, '');
+    this._browseOpen = false;
+  }
+
+  toggleLocale(code) {
+    const next = new Set(this._localeSel);
+    if (next.has(code)) next.delete(code);
+    else next.add(code);
+    this._localeSel = next;
   }
 
   // TRANSLATE: language layer only, published immediately (the fast path). The
@@ -1056,8 +1111,10 @@ class MeridianApp extends LitElement {
           const tm = await ctx.store.readTm(locale);
           const tmt = createTmTranslator({ tm, translate: ctx.translate });
           const out = await localizePage(source, tmt.translate, { to: locale });
-          // Learn the fresh machine translations back into TM for reuse (best-effort).
-          if (tmt.learned.size) await this.saveTm(ctx.store, tm, tmt.learned, 'mt', locale);
+          // Learn only the translations that PASSED the quality gate (out.dict),
+          // never the flagged ones — TM stores approved translations.
+          const learned = new Map([...tmt.learned].filter(([s]) => out.dict.has(s)));
+          if (learned.size) await this.saveTm(ctx.store, tm, learned, 'mt', locale);
           await ctx.store.writeLocalizedPage(locale, ctx.ref, out.html);
           const pub = await ctx.store.publishLocalizedPage(locale, ctx.ref);
           return [locale, {
@@ -1101,12 +1158,17 @@ class MeridianApp extends LitElement {
           const tm = await ctx.store.readTm(locale);
           const tmt = createTmTranslator({ tm, translate: ctx.translate });
           const out = await localizePage(this._localizeSource, tmt.translate, { to: locale });
-          if (tmt.learned.size) await this.saveTm(ctx.store, tm, tmt.learned, 'mt', locale);
-          // Prefill the market (commercial/compliance) fields from any prior
-          // human sign-off in TM — reuse, not re-authoring.
-          const overrides = Object.fromEntries(
-            tmLookup(tm, out.review.map((seg) => seg.source)).hits,
-          );
+          const learned = new Map([...tmt.learned].filter(([s]) => out.dict.has(s)));
+          if (learned.size) await this.saveTm(ctx.store, tm, learned, 'mt', locale);
+          // Prefill each review field: a low-confidence language segment starts
+          // from its machine attempt (to verify/fix); commercial/compliance
+          // start from any prior human sign-off in TM (reuse, not re-authoring).
+          const tmHits = tmLookup(tm, out.review.map((seg) => seg.source)).hits;
+          const overrides = {};
+          out.review.forEach((seg) => {
+            if (seg.suggested != null) overrides[seg.source] = seg.suggested;
+            else if (tmHits.has(seg.source)) overrides[seg.source] = tmHits.get(seg.source);
+          });
           return [locale, {
             ok: true,
             dict: out.dict,
@@ -1145,15 +1207,27 @@ class MeridianApp extends LitElement {
     this._pageBusy = true;
     this._pageError = '';
     try {
-      const localizedHtml = applyLocalization(this._localizeSource, draft.dict, draft.overrides);
+      // An override only counts as "authored" if it is non-blank AND — for a
+      // low-confidence language suggestion — actually edited away from the
+      // machine attempt. An untouched failed suggestion is NEVER published and
+      // never recorded as human sign-off (it stays in source language).
+      const suggestions = new Map(
+        draft.review
+          .filter((s) => s.suggested != null)
+          .map((s) => [s.source, String(s.suggested).trim()]),
+      );
+      const authored = Object.fromEntries(
+        Object.entries(draft.overrides).filter(([src, v]) => {
+          const val = (v ?? '').trim();
+          return val && val !== suggestions.get(src);
+        }),
+      );
+      const localizedHtml = applyLocalization(this._localizeSource, draft.dict, authored);
       await store.writeLocalizedPage(locale, this._localizeRef, localizedHtml);
       const pub = await store.publishLocalizedPage(locale, this._localizeRef);
       // Commit the successful publish (result + drop the draft) BEFORE touching
       // TM, so a TM hiccup can never mislabel a live page as failed or lose the
       // draft.
-      const authored = Object.fromEntries(
-        Object.entries(draft.overrides).filter(([, v]) => v && String(v).trim()),
-      );
       const heldDone = Object.keys(authored).length;
       this._pageResults = new Map(this._pageResults).set(locale, {
         ok: true,
@@ -1202,10 +1276,31 @@ class MeridianApp extends LitElement {
         </div>
         ${r.kind === 'translate' && r.review?.length ? html`
           <div class="mrd-entry-meta">
-            ${r.review.length} commercial/compliance segment(s) kept in source language —
-            use Localize to author them per market.
+            ${r.review.length} segment(s) held in source language (market copy + low-confidence
+            translations) — use Localize to resolve them per market.
           </div>` : nothing}
       </div>`;
+  }
+
+  renderOverride(locale, seg, draft) {
+    const isQuality = seg.layer === 'language';
+    const chip = isQuality ? 'low-confidence' : seg.layer;
+    const severity = seg.layer === 'compliance' ? 'critical' : 'warning';
+    return html`
+      <label class="mrd-override">
+        <span class="mrd-override-cap">
+          <span class="mrd-kind mrd-${severity}">${chip}</span>
+          ${seg.source}
+        </span>
+        ${isQuality && seg.issues?.length ? html`
+          <span class="mrd-override-issues">${seg.issues.map((i) => i.detail).join('; ')}</span>` : nothing}
+        <textarea class="mrd-override-input" ?disabled=${this._pageBusy}
+          placeholder=${isQuality
+    ? `Verify/fix the ${locale} translation (blank = keep source language)`
+    : `Market ${seg.layer} text for ${locale} (blank = keep source language)`}
+          .value=${draft.overrides[seg.source] ?? ''}
+          @change=${(e) => this.setOverride(locale, seg.source, e.target.value)}></textarea>
+      </label>`;
   }
 
   renderLocalizeDraft(locale, draft) {
@@ -1234,22 +1329,39 @@ class MeridianApp extends LitElement {
         </div>
         ${draft.review.length ? html`
           <div class="mrd-entry-meta">
-            Author the ${draft.review.length} market segment(s) — the machine never writes these
-            (prefilled from memory where you've signed off before):
+            Resolve the ${draft.review.length} held segment(s) — market copy to <em>author</em>
+            (machine never writes these) and low-confidence translations to <em>verify</em>
+            (prefilled from the machine attempt or prior sign-off):
           </div>
-          ${draft.review.map((seg) => html`
-            <label class="mrd-override">
-              <span class="mrd-override-cap">
-                <span class="mrd-kind mrd-${seg.layer === 'compliance' ? 'critical' : 'warning'}">${seg.layer}</span>
-                ${seg.source}
-              </span>
-              <textarea class="mrd-override-input" ?disabled=${this._pageBusy}
-                placeholder="Market ${seg.layer} text for ${locale} (blank = keep source language)"
-                .value=${draft.overrides[seg.source] ?? ''}
-                @change=${(e) => this.setOverride(locale, seg.source, e.target.value)}></textarea>
-            </label>`)}
-        ` : html`<div class="mrd-entry-meta">No market segments to author — publish to finish.</div>`}
+          ${draft.review.map((seg) => this.renderOverride(locale, seg, draft))}
+        ` : html`<div class="mrd-entry-meta">Nothing held — publish to finish.</div>`}
       </div>`;
+  }
+
+  renderTreeLevel(path) {
+    const kids = this._pageTree.get(path);
+    if (!kids) return html`<div class="mrd-tree-note">Loading…</div>`;
+    if (!kids.length) return html`<div class="mrd-tree-note">(empty)</div>`;
+    return html`<ul class="mrd-tree-list">${kids.map((n) => this.renderTreeNode(n))}</ul>`;
+  }
+
+  renderTreeNode(node) {
+    if (node.isFolder) {
+      const open = this._pageExpanded.has(node.path);
+      return html`
+        <li>
+          <button class="mrd-tree-folder" @click=${() => this.toggleFolder(node.path)}>
+            <span class="mrd-tree-caret">${open ? '▾' : '▸'}</span> ${node.name}
+          </button>
+          ${open ? this.renderTreeLevel(node.path) : nothing}
+        </li>`;
+    }
+    const ref = node.path.replace(/^\/+/, '').replace(/\.html$/, '');
+    return html`
+      <li>
+        <button class="mrd-tree-page ${ref === this._pageRef ? 'sel' : ''}"
+          @click=${() => this.selectPage(node)}>${node.name.replace(/\.html$/, '')}</button>
+      </li>`;
   }
 
   renderPages() {
@@ -1261,13 +1373,20 @@ class MeridianApp extends LitElement {
         <em>translated</em> page and a <em>localized</em> one.
       </p>
       <div class="mrd-page-form">
-        <label for="pg-ref">Page</label>
-        <input id="pg-ref" class="mrd-scope-input mrd-page-input" .value=${this._pageRef}
-          @change=${(e) => { this._pageRef = e.target.value; }} ?disabled=${this._pageBusy} />
-        <label for="pg-locales">Locales</label>
-        <input id="pg-locales" class="mrd-scope-input mrd-page-input" .value=${this._pageLocales}
-          placeholder="es, it" @change=${(e) => { this._pageLocales = e.target.value; }}
-          ?disabled=${this._pageBusy} />
+        <label>Page</label>
+        <button class="mrd-page-pick" ?disabled=${this._pageBusy} @click=${() => this.toggleBrowse()}>
+          ${this._pageRef || 'Choose a page…'} <span class="mrd-tree-caret">▾</span>
+        </button>
+        <label>Languages</label>
+        <span class="mrd-lang-chips">
+          ${LANG_OPTIONS.map(([code, name]) => html`
+            <button class="mrd-lang-chip ${this._localeSel.has(code) ? 'on' : ''}"
+              title=${name} ?disabled=${this._pageBusy}
+              @click=${() => this.toggleLocale(code)}>${code}</button>`)}
+        </span>
+      </div>
+      ${this._browseOpen ? html`<div class="mrd-tree">${this.renderTreeLevel('')}</div>` : nothing}
+      <div class="mrd-page-actions">
         <sl-button class="primary outline" ?disabled=${this._pageBusy}
           @click=${() => this.translatePages()}>Translate &amp; publish</sl-button>
         <sl-button ?disabled=${this._pageBusy} @click=${() => this.startLocalize()}>Localize</sl-button>

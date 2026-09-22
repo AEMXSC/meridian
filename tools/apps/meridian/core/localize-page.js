@@ -28,6 +28,7 @@
  */
 
 import { extractStrings, localizeHtml, coverage } from './eds-html.js';
+import { gateDict } from './quality.js';
 
 function toMap(m) {
   if (m instanceof Map) return new Map(m);
@@ -51,22 +52,34 @@ export function classifySegment(text) {
 // compliance segments are withheld from the published page entirely (left in the
 // source language) and returned in `review` for a human to localize and sign off
 // — the machine never authors that content, even as a suggestion (PRD §11).
-// Returns { html, coverage, review }. `coverage` is honest: commercial/compliance
-// segments count as untranslated until a human completes them.
-export async function localizePage(html, translate, { to, from = 'en' } = {}) {
+// Machine translations are then QUALITY-GATED (MQM-lite): only segments that
+// pass are published; segments that fail are HELD and added to `review` as
+// low-confidence language (with the machine attempt as a suggestion + issues),
+// so the fast Translate path never ships a bad translation unseen.
+// Returns { html, dict (published pass dict), coverage, review }. `coverage` is
+// honest: withheld commercial/compliance AND flagged language count as untranslated.
+export async function localizePage(html, translate, {
+  to, from = 'en', dnt = [], minScore,
+} = {}) {
   if (!to) throw new Error('localizePage requires a target locale');
   const strings = extractStrings(html);
   const layerOf = new Map(strings.map((s) => [s, classifySegment(s)]));
   const languageStrings = strings.filter((s) => layerOf.get(s) === 'language');
-  const dict = await translate(languageStrings, { from, to });
-  const localized = localizeHtml(html, dict);
-  const review = strings
-    .filter((s) => layerOf.get(s) !== 'language')
-    .map((source) => ({ source, layer: layerOf.get(source) }));
-  // `dict` (the language translations) is returned so a fuller Localize flow can
-  // merge human-authored commercial/compliance overrides on top before publish.
+  const translated = await translate(languageStrings, { from, to });
+  const { pass, flagged } = gateDict(translated, { dnt, minScore });
+  const localized = localizeHtml(html, pass);
+  const review = [
+    ...strings
+      .filter((s) => layerOf.get(s) !== 'language')
+      .map((source) => ({ source, layer: layerOf.get(source) })),
+    ...flagged.map((f) => ({
+      source: f.source, layer: 'language', suggested: f.target, score: f.score, issues: f.issues,
+    })),
+  ];
+  // `dict` (the PUBLISHED language translations) is returned so a fuller Localize
+  // flow can merge human overrides/fixes on top before publish.
   return {
-    html: localized, dict, coverage: coverage(html, dict), review,
+    html: localized, dict: pass, coverage: coverage(html, pass), review,
   };
 }
 
