@@ -57,6 +57,12 @@ try {
 // re-enters context (the annoyance called out in the Experience Workspace demo).
 const TABS = ['exposure', 'taste', 'adapt', 'pages'];
 
+// Plain-language one-liners for the jargon-y queue tabs (shown under the tabs).
+const TAB_HELP = {
+  exposure: 'Where markets are out of date, missing required content, or drifting from the source.',
+  taste: 'Machine changes waiting for your approval before they go live.',
+};
+
 // Common target languages offered as quick-pick chips (code + label).
 const LANG_OPTIONS = [
   ['es', 'Spanish'], ['it', 'Italian'], ['fr', 'French'], ['de', 'German'],
@@ -126,6 +132,7 @@ class MeridianApp extends LitElement {
     _pageExpanded: { state: true },
     _previewOpen: { state: true },
     _pageRisk: { state: true },
+    _toast: { state: true },
   };
 
   connectedCallback() {
@@ -165,6 +172,7 @@ class MeridianApp extends LitElement {
     this._pageExpanded = new Set();
     this._previewOpen = new Set();
     this._pageRisk = [];
+    this._toast = '';
     this._localizeSource = '';
     this._localizeRef = '';
     // The store a Localize draft was staged against — captured so a later
@@ -709,27 +717,32 @@ class MeridianApp extends LitElement {
             ${[...new Set(this._recent.map((r) => r.org))].map((o) => html`<option value=${o}></option>`)}
           </datalist>
           <span class="mrd-scope-sep" aria-hidden="true">/</span>
-          <input class="mrd-scope-input" id="site-input" list="mrd-sites" placeholder="site"
-            aria-label="Site"
-            value=${this._site} ?disabled=${this._state === 'loading'} />
-          <datalist id="mrd-sites">
-            ${this.siteSuggestions.map((s) => html`<option value=${s}></option>`)}
-          </datalist>
+          <select class="mrd-scope-select" id="site-input" aria-label="Site"
+            ?disabled=${this._state === 'loading'} @change=${(e) => { this._site = e.target.value; }}>
+            ${this._site ? nothing : html`<option value="" selected>Choose a site…</option>`}
+            ${[...new Set([this._site, ...this.siteSuggestions].filter(Boolean))]
+    .map((s) => html`<option value=${s} ?selected=${s === this._site}>${s}</option>`)}
+          </select>
         </form>
         <sl-button class="mrd-scan primary outline" ?disabled=${this._state === 'loading'}
           @click=${this.handleSubmit}>Scan</sl-button>
       </div>
       ${this._state === 'ready' ? html`
-        <div class="mrd-tabs">
-          <button class="mrd-tab ${this._tab === 'exposure' ? 'active' : ''}"
-            @click=${() => { this._tab = 'exposure'; }}>Exposure queue</button>
-          <button class="mrd-tab ${this._tab === 'taste' ? 'active' : ''}"
+        <div class="mrd-tabs" role="tablist">
+          <button role="tab" aria-selected=${this._tab === 'exposure'}
+            class="mrd-tab ${this._tab === 'exposure' ? 'active' : ''}"
+            @click=${() => { this._tab = 'exposure'; }}>Exposure</button>
+          <button role="tab" aria-selected=${this._tab === 'taste'}
+            class="mrd-tab ${this._tab === 'taste' ? 'active' : ''}"
             @click=${() => { this._tab = 'taste'; }}>Taste queue${this._queue.length ? html` <span class="mrd-badge">${this._queue.length}</span>` : nothing}</button>
-          <button class="mrd-tab ${this._tab === 'adapt' ? 'active' : ''}"
+          <button role="tab" aria-selected=${this._tab === 'adapt'}
+            class="mrd-tab ${this._tab === 'adapt' ? 'active' : ''}"
             @click=${() => { this._tab = 'adapt'; }}>Adaptations</button>
-          <button class="mrd-tab ${this._tab === 'pages' ? 'active' : ''}"
+          <button role="tab" aria-selected=${this._tab === 'pages'}
+            class="mrd-tab ${this._tab === 'pages' ? 'active' : ''}"
             @click=${() => { this._tab = 'pages'; }}>Pages</button>
-        </div>` : nothing}
+        </div>
+        ${TAB_HELP[this._tab] ? html`<div class="mrd-tab-help">${TAB_HELP[this._tab]}</div>` : nothing}` : nothing}
       ${this._error ? html`<div class="nx-alert warning">${this._error}</div>` : nothing}
     `;
   }
@@ -1086,6 +1099,14 @@ class MeridianApp extends LitElement {
     return `https://main--${this._site}--${this._org}.aem.live/${clean}`;
   }
 
+  // Transient success confirmation (auto-dismisses). Actions otherwise complete
+  // silently — a toast is the expected feedback affordance.
+  showToast(msg) {
+    this._toast = msg;
+    clearTimeout(this._toastTimer);
+    this._toastTimer = setTimeout(() => { this._toast = ''; }, 4000);
+  }
+
   togglePreview(key) {
     const next = new Set(this._previewOpen);
     if (next.has(key)) next.delete(key);
@@ -1175,6 +1196,8 @@ class MeridianApp extends LitElement {
       });
       const settled = await runWithConcurrency(tasks, 3);
       this._pageResults = new Map(settled.map((s) => s.value));
+      const ok = [...this._pageResults.values()].filter((r) => r.ok).length;
+      if (ok) this.showToast(`Translated & published ${ok} market(s) of ${ctx.ref}`);
     } catch (e) {
       this._pageError = e.message;
     } finally {
@@ -1287,6 +1310,7 @@ class MeridianApp extends LitElement {
       const drafts = new Map(this._localizeDrafts);
       drafts.delete(locale);
       this._localizeDrafts = drafts;
+      this.showToast(`Localized & published ${locale} — live`);
       // Human sign-off becomes durable TM (origin human), reused next run — but
       // it is best-effort: the page is already live.
       if (heldDone) await this.saveTm(store, await store.readTm(locale), authored, 'human', locale);
@@ -1504,7 +1528,9 @@ class MeridianApp extends LitElement {
   }
 
   render() {
-    return html`${this.renderToolbar()}${this.renderContent()}`;
+    return html`
+      ${this.renderToolbar()}${this.renderContent()}
+      ${this._toast ? html`<div class="mrd-toast" role="status">${this._toast}</div>` : nothing}`;
   }
 }
 
