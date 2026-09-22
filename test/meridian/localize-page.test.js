@@ -16,7 +16,9 @@
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { localizePage, classifySegment } from '../../tools/apps/meridian/core/localize-page.js';
+import {
+  localizePage, classifySegment, applyLocalization, hasPendingOverrides,
+} from '../../tools/apps/meridian/core/localize-page.js';
 
 const PAGE = '<main><div><div class="hero-commercial"><div><div>'
   + '<h1>Bank without borders.</h1>'
@@ -70,4 +72,35 @@ test('localizePage coverage is honest: only the translated language layer counts
 
 test('localizePage requires a target locale', async () => {
   await assert.rejects(() => localizePage(PAGE, stubTranslate, {}), /target locale/);
+});
+
+test('localizePage returns the language dict so a Localize flow can add overrides', async () => {
+  const { dict } = await localizePage(PAGE, stubTranslate, { to: 'es' });
+  assert.equal(dict.get('Bank without borders.'), '[es] Bank without borders.');
+  // Only language segments are in the dict; withheld ones are not.
+  assert.ok(![...dict.keys()].some((k) => k.includes('SWIFT')));
+});
+
+test('applyLocalization merges human overrides over language and escapes them', async () => {
+  const { dict } = await localizePage(PAGE, stubTranslate, { to: 'es' });
+  const out = applyLocalization(PAGE, dict, {
+    'Share Citizens SWIFT code (CTZIUS33) with the sender.': 'Comparta el código SWIFT de Citizens (CTZIUS33) & envíe.',
+  });
+  assert.ok(out.includes('<h1>[es] Bank without borders.</h1>'), 'language still applied');
+  assert.ok(out.includes('código SWIFT de Citizens (CTZIUS33) &amp; envíe'), 'override applied + escaped');
+});
+
+test('applyLocalization ignores blank overrides (segment stays in source language)', () => {
+  const html = '<p>Standard terms apply.</p>';
+  const out = applyLocalization(html, {}, { 'Standard terms apply.': '   ' });
+  assert.equal(out, html);
+});
+
+test('hasPendingOverrides detects any non-blank staged override (guards against data loss)', () => {
+  assert.equal(hasPendingOverrides([]), false);
+  assert.equal(hasPendingOverrides([{ overrides: {} }]), false);
+  assert.equal(hasPendingOverrides([{ overrides: { x: '   ' } }]), false, 'blank does not count');
+  assert.equal(hasPendingOverrides([{ overrides: { x: 'Comparta el código' } }]), true);
+  assert.equal(hasPendingOverrides([{ ok: false }, { overrides: { a: 'b' } }]), true);
+  assert.equal(hasPendingOverrides(new Map([['es', { overrides: { a: 'b' } }]]).values()), true);
 });

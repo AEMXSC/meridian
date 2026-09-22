@@ -606,3 +606,50 @@
 .mrd-review {
   margin-top: var(--mrd-space-100);
 }
+
+.mrd-page-publish {
+  margin-left: auto;
+}
+
+.mrd-section-label {
+  display: flex;
+  align-items: center;
+  gap: var(--mrd-space-100);
+  margin: var(--mrd-space-200) 0 var(--mrd-space-100);
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--mrd-text);
+}
+
+.mrd-clear-drafts {
+  margin-left: auto;
+}
+
+.mrd-override {
+  display: block;
+  padding: var(--mrd-space-100) 0;
+  border-top: 1px solid var(--mrd-surface-sunken);
+}
+
+.mrd-override-cap {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  font-size: 13px;
+  color: #4b4b4b;
+  margin-bottom: 6px;
+}
+
+.mrd-override-input {
+  width: 100%;
+  box-sizing: border-box;
+  min-height: 52px;
+  font: inherit;
+  font-size: 13px;
+  padding: 8px 10px;
+  border: 1px solid var(--mrd-border);
+  border-radius: var(--mrd-radius-control);
+  background: var(--mrd-surface);
+  color: var(--mrd-text);
+  resize: vertical;
+}

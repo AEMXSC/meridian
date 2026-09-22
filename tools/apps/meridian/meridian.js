@@ -27,7 +27,7 @@ import { readSheet } from './core/da-config.js';
 import runWithConcurrency from './core/concurrency.js';
 import { LAYER_PRECEDENCE } from './core/schemas.js';
 import { createTranslator } from './core/translate.js';
-import { localizePage } from './core/localize-page.js';
+import { localizePage, applyLocalization, hasPendingOverrides } from './core/localize-page.js';
 import { icon } from '../msm/core/icons.js';
 import { daFetch } from '../msm/core/fetch.js';
 import 'https://da.live/nx/public/sl/components.js';
@@ -105,6 +105,7 @@ class MeridianApp extends LitElement {
     _pageResults: { state: true },
     _pageBusy: { state: true },
     _pageError: { state: true },
+    _localizeDrafts: { state: true },
   };
 
   connectedCallback() {
@@ -138,6 +139,12 @@ class MeridianApp extends LitElement {
     this._pageResults = new Map();
     this._pageBusy = false;
     this._pageError = '';
+    this._localizeDrafts = new Map();
+    this._localizeSource = '';
+    this._localizeRef = '';
+    // The store a Localize draft was staged against — captured so a later
+    // Publish can never target a since-repointed org/site.
+    this._localizeStore = null;
     // Deep-link / editor context wins; otherwise fall back to the most recent
     // org/site so a returning author lands where they left off.
     this._org = this._org || (this._recent[0]?.org ?? '');
@@ -980,41 +987,139 @@ class MeridianApp extends LitElement {
     `;
   }
 
-  // Real whole-page localization: read the site's English page, translate the
-  // language layer (via the pluggable provider through the worker), hold
-  // commercial/compliance for sign-off, write + publish a real live page per
-  // locale. Per-locale failures are isolated (runWithConcurrency never rejects).
-  async localizePages() {
-    if (!this._org || !this._site) { this._pageError = 'Set org/site first.'; return; }
+  // Shared setup for both page actions. Returns { ref, locales, store, translate }
+  // or { error }.
+  pageInputs() {
+    if (!this._org || !this._site) return { error: 'Set org/site first.' };
     const ref = (this._pageRef || '').trim();
     const locales = (this._pageLocales || '').split(',').map((s) => s.trim()).filter(Boolean);
-    if (!ref || !locales.length) { this._pageError = 'Enter a page and at least one locale.'; return; }
+    if (!ref || !locales.length) return { error: 'Enter a page and at least one locale.' };
     const store = this._store || new DaStore({ org: this._org, site: this._site });
     this._store = store;
     const translate = createTranslator(daFetch, { org: this._org, site: this._site });
+    return {
+      ref, locales, store, translate,
+    };
+  }
+
+  // TRANSLATE: language layer only, published immediately (the fast path). The
+  // withheld commercial/compliance segments stay in the source language.
+  // Refuse to discard hand-authored, unpublished overrides silently. Returns
+  // true (and sets the error) when there is pending work to protect.
+  guardPendingDrafts() {
+    if (hasPendingOverrides(this._localizeDrafts.values())) {
+      this._pageError = 'You have unpublished market overrides — Publish them, or Clear drafts, first.';
+      return true;
+    }
+    return false;
+  }
+
+  clearDrafts() {
+    this._localizeDrafts = new Map();
+    this._localizeStore = null;
+    this._pageError = '';
+  }
+
+  async translatePages() {
+    const ctx = this.pageInputs();
+    if (ctx.error) { this._pageError = ctx.error; return; }
+    if (this.guardPendingDrafts()) return;
     this._pageBusy = true;
     this._pageError = '';
     this._pageResults = new Map();
+    this._localizeDrafts = new Map();
     try {
-      const source = await store.readPageHtml(ref);
-      const tasks = locales.map((locale) => async () => {
+      const source = await ctx.store.readPageHtml(ctx.ref);
+      const tasks = ctx.locales.map((locale) => async () => {
         try {
-          const out = await localizePage(source, translate, { to: locale });
-          await store.writeLocalizedPage(locale, ref, out.html);
-          const pub = await store.publishLocalizedPage(locale, ref);
+          const out = await localizePage(source, ctx.translate, { to: locale });
+          await ctx.store.writeLocalizedPage(locale, ctx.ref, out.html);
+          const pub = await ctx.store.publishLocalizedPage(locale, ctx.ref);
           return [locale, {
-            ok: true, coverage: out.coverage, review: out.review, ...pub,
+            ok: true, kind: 'translate', coverage: out.coverage, review: out.review, ...pub,
           }];
         } catch (e) {
           return [locale, { ok: false, error: e.message }];
         }
       });
-      // runWithConcurrency resolves to allSettled wrappers; the tasks self-catch
-      // and never reject, so every settled value is our [locale, result] pair.
       const settled = await runWithConcurrency(tasks, 3);
       this._pageResults = new Map(settled.map((s) => s.value));
     } catch (e) {
       this._pageError = e.message;
+    } finally {
+      this._pageBusy = false;
+    }
+  }
+
+  // LOCALIZE step 1: translate the language layer, then stage the withheld
+  // commercial/compliance segments for human authoring before any publish.
+  async startLocalize() {
+    const ctx = this.pageInputs();
+    if (ctx.error) { this._pageError = ctx.error; return; }
+    if (this.guardPendingDrafts()) return;
+    this._pageBusy = true;
+    this._pageError = '';
+    this._pageResults = new Map();
+    this._localizeDrafts = new Map();
+    try {
+      this._localizeSource = await ctx.store.readPageHtml(ctx.ref);
+      this._localizeRef = ctx.ref;
+      // Bind the draft to the exact store it was staged against.
+      this._localizeStore = ctx.store;
+      const tasks = ctx.locales.map((locale) => async () => {
+        try {
+          const out = await localizePage(this._localizeSource, ctx.translate, { to: locale });
+          return [locale, {
+            ok: true, dict: out.dict, review: out.review, coverage: out.coverage, overrides: {},
+          }];
+        } catch (e) {
+          return [locale, { ok: false, error: e.message }];
+        }
+      });
+      const settled = await runWithConcurrency(tasks, 3);
+      this._localizeDrafts = new Map(settled.map((s) => s.value));
+    } catch (e) {
+      this._pageError = e.message;
+    } finally {
+      this._pageBusy = false;
+    }
+  }
+
+  setOverride(locale, source, value) {
+    const draft = this._localizeDrafts.get(locale);
+    if (!draft) return;
+    const next = new Map(this._localizeDrafts);
+    next.set(locale, { ...draft, overrides: { ...draft.overrides, [source]: value } });
+    this._localizeDrafts = next;
+  }
+
+  // LOCALIZE step 2: merge language translations + the human-authored market
+  // overrides and publish the fully localized page for one market.
+  async publishLocalized(locale) {
+    const draft = this._localizeDrafts.get(locale);
+    const store = this._localizeStore;
+    if (!draft?.ok || !store) return;
+    this._pageBusy = true;
+    this._pageError = '';
+    try {
+      const localizedHtml = applyLocalization(this._localizeSource, draft.dict, draft.overrides);
+      await store.writeLocalizedPage(locale, this._localizeRef, localizedHtml);
+      const pub = await store.publishLocalizedPage(locale, this._localizeRef);
+      const heldDone = draft.review
+        .filter((seg) => (draft.overrides[seg.source] || '').trim()).length;
+      this._pageResults = new Map(this._pageResults).set(locale, {
+        ok: true,
+        kind: 'localize',
+        coverage: draft.coverage,
+        heldTotal: draft.review.length,
+        heldDone,
+        ...pub,
+      });
+      const drafts = new Map(this._localizeDrafts);
+      drafts.delete(locale);
+      this._localizeDrafts = drafts;
+    } catch (e) {
+      this._pageError = `Publish failed for ${locale}: ${e.message}`;
     } finally {
       this._pageBusy = false;
     }
@@ -1032,34 +1137,72 @@ class MeridianApp extends LitElement {
         </div>`;
     }
     const pct = Math.round((r.coverage?.ratio ?? 0) * 100);
+    const badge = r.kind === 'localize'
+      ? `localized · language ${pct}% · market ${r.heldDone}/${r.heldTotal}`
+      : `translated · language ${pct}%`;
     return html`
       <div class="mrd-market">
         <div class="mrd-market-head">
           <span class="mrd-locale">${locale}</span>
-          <span class="mrd-kind mrd-positive">published · ${pct}% translated</span>
+          <span class="mrd-kind mrd-positive">${badge}</span>
           <a class="mrd-page-link" href=${r.liveUrl} target="_blank" rel="noopener">View live page ↗</a>
         </div>
-        ${r.review.length ? html`
+        ${r.kind === 'translate' && r.review?.length ? html`
           <div class="mrd-entry-meta">
-            ${r.review.length} segment(s) held for human localization (kept in source language,
-            not machine-translated):
+            ${r.review.length} commercial/compliance segment(s) kept in source language —
+            use Localize to author them per market.
+          </div>` : nothing}
+      </div>`;
+  }
+
+  renderLocalizeDraft(locale, draft) {
+    if (!draft.ok) {
+      return html`
+        <div class="mrd-market">
+          <div class="mrd-market-head">
+            <span class="mrd-locale">${locale}</span>
+            <span class="mrd-kind mrd-critical">failed</span>
           </div>
-          <div class="mrd-review">
-            ${r.review.map((seg) => html`
-              <div class="mrd-finding mrd-${seg.layer === 'compliance' ? 'critical' : 'warning'}">
-                <span class="mrd-kind">${seg.layer}</span>
-                <span class="mrd-detail">${seg.source}</span>
-              </div>`)}
-          </div>` : html`<div class="mrd-entry-meta">No commercial/compliance segments flagged.</div>`}
+          <div class="mrd-detail">${draft.error}</div>
+        </div>`;
+    }
+    const pct = Math.round((draft.coverage?.ratio ?? 0) * 100);
+    return html`
+      <div class="mrd-market">
+        <div class="mrd-market-head">
+          <span class="mrd-locale">${locale}</span>
+          <span class="mrd-kind mrd-positive">language ${pct}% translated</span>
+          <sl-button class="mrd-page-publish" ?disabled=${this._pageBusy}
+            @click=${() => this.publishLocalized(locale)}>
+            ${this._pageBusy ? 'Publishing…' : `Publish ${locale}`}
+          </sl-button>
+        </div>
+        ${draft.review.length ? html`
+          <div class="mrd-entry-meta">
+            Author the ${draft.review.length} market segment(s) — the machine never writes these:
+          </div>
+          ${draft.review.map((seg) => html`
+            <label class="mrd-override">
+              <span class="mrd-override-cap">
+                <span class="mrd-kind mrd-${seg.layer === 'compliance' ? 'critical' : 'warning'}">${seg.layer}</span>
+                ${seg.source}
+              </span>
+              <textarea class="mrd-override-input" ?disabled=${this._pageBusy}
+                placeholder="Market ${seg.layer} text for ${locale} (blank = keep source language)"
+                .value=${draft.overrides[seg.source] ?? ''}
+                @change=${(e) => this.setOverride(locale, seg.source, e.target.value)}></textarea>
+            </label>`)}
+        ` : html`<div class="mrd-entry-meta">No market segments to author — publish to finish.</div>`}
       </div>`;
   }
 
   renderPages() {
     return html`
       <p class="mrd-adapt-intro">
-        Localize a real page from this site. Meridian translates the language layer, holds
-        commercial &amp; compliance segments for your sign-off, and publishes a real live URL per
-        market — computed fresh from the English source, never hand-maintained.
+        Localize a real page from this site. <strong>Translate</strong> does the language layer
+        automatically (machine). <strong>Localize</strong> also lets you author the market-specific
+        commercial &amp; compliance segments before publishing — the difference between a
+        <em>translated</em> page and a <em>localized</em> one.
       </p>
       <div class="mrd-page-form">
         <label for="pg-ref">Page</label>
@@ -1069,11 +1212,20 @@ class MeridianApp extends LitElement {
         <input id="pg-locales" class="mrd-scope-input mrd-page-input" .value=${this._pageLocales}
           placeholder="es, it" @change=${(e) => { this._pageLocales = e.target.value; }}
           ?disabled=${this._pageBusy} />
-        <sl-button ?disabled=${this._pageBusy} @click=${() => this.localizePages()}>
-          ${this._pageBusy ? 'Localizing…' : 'Localize & publish'}
-        </sl-button>
+        <sl-button class="primary outline" ?disabled=${this._pageBusy}
+          @click=${() => this.translatePages()}>Translate &amp; publish</sl-button>
+        <sl-button ?disabled=${this._pageBusy} @click=${() => this.startLocalize()}>Localize</sl-button>
       </div>
       ${this._pageError ? html`<div class="nx-alert warning">${this._pageError}</div>` : nothing}
+      ${this._localizeDrafts.size ? html`
+        <div class="mrd-section-label">
+          <span>Localize — author each market's commercial/compliance text, then publish per market:</span>
+          <sl-button class="primary outline mrd-clear-drafts" ?disabled=${this._pageBusy}
+            @click=${() => this.clearDrafts()}>Clear drafts</sl-button>
+        </div>
+        <div class="mrd-list">
+          ${[...this._localizeDrafts].map(([l, d]) => this.renderLocalizeDraft(l, d))}
+        </div>` : nothing}
       ${this._pageResults.size
     ? html`<div class="mrd-list">${[...this._pageResults].map(([l, r]) => this.renderPageResult(l, r))}</div>`
     : nothing}

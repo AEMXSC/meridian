@@ -29,6 +29,11 @@
 
 import { extractStrings, localizeHtml, coverage } from './eds-html.js';
 
+function toMap(m) {
+  if (m instanceof Map) return new Map(m);
+  return new Map(Object.entries(m || {}));
+}
+
 // Signals that a text segment is commercial (money/pricing) or compliance
 // (legal/regulatory) — those layers are human-owned, not machine-authored.
 const COMMERCIAL = /[$€£¥]|\bUSD\b|\bEUR\b|\bGBP\b|\bAPR\b|\bAPY\b|%|\bfees?\b|\brates?\b|\bprice/i;
@@ -58,5 +63,28 @@ export async function localizePage(html, translate, { to, from = 'en' } = {}) {
   const review = strings
     .filter((s) => layerOf.get(s) !== 'language')
     .map((source) => ({ source, layer: layerOf.get(source) }));
-  return { html: localized, coverage: coverage(html, dict), review };
+  // `dict` (the language translations) is returned so a fuller Localize flow can
+  // merge human-authored commercial/compliance overrides on top before publish.
+  return {
+    html: localized, dict, coverage: coverage(html, dict), review,
+  };
+}
+
+// Complete a localization: language translations plus human-authored overrides
+// for the withheld commercial/compliance segments. Overrides are keyed by the
+// source string; empty values are ignored (that segment stays in source
+// language). Returns the fully localized HTML.
+export function applyLocalization(html, languageDict, overrides = {}) {
+  const merged = toMap(languageDict);
+  toMap(overrides).forEach((value, source) => {
+    if (value != null && String(value).trim() !== '') merged.set(source, value);
+  });
+  return localizeHtml(html, merged);
+}
+
+// True if any staged Localize draft holds a non-blank human override — used to
+// warn before discarding unpublished, hand-authored sign-off work.
+export function hasPendingOverrides(drafts) {
+  return [...(drafts || [])].some((draft) => draft && draft.overrides
+    && Object.values(draft.overrides).some((v) => v != null && String(v).trim() !== ''));
 }
