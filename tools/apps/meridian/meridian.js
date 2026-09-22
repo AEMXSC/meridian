@@ -124,6 +124,7 @@ class MeridianApp extends LitElement {
     _browseOpen: { state: true },
     _pageTree: { state: true },
     _pageExpanded: { state: true },
+    _previewOpen: { state: true },
   };
 
   connectedCallback() {
@@ -161,6 +162,7 @@ class MeridianApp extends LitElement {
     this._browseOpen = false;
     this._pageTree = new Map();
     this._pageExpanded = new Set();
+    this._previewOpen = new Set();
     this._localizeSource = '';
     this._localizeRef = '';
     // The store a Localize draft was staged against — captured so a later
@@ -1073,6 +1075,19 @@ class MeridianApp extends LitElement {
     this._localeSel = next;
   }
 
+  // The published edge URL of a source (English) page, for the side-by-side preview.
+  pageEdgeUrl(ref) {
+    const clean = (ref || '').replace(/^\/+/, '').replace(/\.html$/, '');
+    return `https://main--${this._site}--${this._org}.aem.live/${clean}`;
+  }
+
+  togglePreview(key) {
+    const next = new Set(this._previewOpen);
+    if (next.has(key)) next.delete(key);
+    else next.add(key);
+    this._previewOpen = next;
+  }
+
   // TRANSLATE: language layer only, published immediately (the fast path). The
   // withheld commercial/compliance segments stay in the source language.
   // Refuse to discard hand-authored, unpublished overrides silently. Returns
@@ -1130,6 +1145,7 @@ class MeridianApp extends LitElement {
             coverage: out.coverage,
             review: out.review,
             memory: tmLeverage(tmt.stats),
+            sourceUrl: this.pageEdgeUrl(ctx.ref),
             ...pub,
           }];
         } catch (e) {
@@ -1244,6 +1260,7 @@ class MeridianApp extends LitElement {
         heldTotal: draft.review.length,
         heldDone,
         memory: draft.memory,
+        sourceUrl: this.pageEdgeUrl(this._localizeRef),
         ...pub,
       });
       const drafts = new Map(this._localizeDrafts);
@@ -1275,17 +1292,41 @@ class MeridianApp extends LitElement {
     const badge = r.kind === 'localize'
       ? `localized · language ${pct}% · market ${r.heldDone}/${r.heldTotal}${mem}`
       : `translated · language ${pct}%${mem}`;
+    const previewing = this._previewOpen.has(locale);
     return html`
       <div class="mrd-market">
         <div class="mrd-market-head">
           <span class="mrd-locale">${locale}</span>
           <span class="mrd-kind mrd-positive">${badge}</span>
+          <button class="mrd-preview-toggle" @click=${() => this.togglePreview(locale)}>
+            ${previewing ? 'Hide preview' : 'Preview'}
+          </button>
           <a class="mrd-page-link" href=${r.liveUrl} target="_blank" rel="noopener">View live page ↗</a>
         </div>
         ${r.kind === 'translate' && r.review?.length ? html`
           <div class="mrd-entry-meta">
             ${r.review.length} segment(s) held in source language (market copy + low-confidence
             translations) — use Localize to resolve them per market.
+          </div>` : nothing}
+        ${previewing ? html`
+          <div class="mrd-preview">
+            <div class="mrd-preview-pane">
+              <div class="mrd-preview-label">Source (English)</div>
+              <iframe class="mrd-preview-frame" title="Source page ${locale}"
+                src=${r.sourceUrl} loading="lazy"></iframe>
+            </div>
+            <div class="mrd-preview-pane">
+              <div class="mrd-preview-label">${locale} (localized)</div>
+              <iframe class="mrd-preview-frame" title="Localized page ${locale}"
+                src=${r.liveUrl} loading="lazy"></iframe>
+            </div>
+          </div>
+          <div class="mrd-entry-meta">
+            If a pane is blank, the site blocks framing — open
+            <a class="mrd-page-link-inline" href=${r.sourceUrl} target="_blank" rel="noopener">source</a>
+            /
+            <a class="mrd-page-link-inline" href=${r.liveUrl} target="_blank" rel="noopener">localized</a>
+            in new tabs.
           </div>` : nothing}
       </div>`;
   }
