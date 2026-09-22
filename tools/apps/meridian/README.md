@@ -52,6 +52,16 @@ same registration works for every site — there is nothing site-specific to cha
 
 ## Configure a site's markets
 
+**Drop-in with DA's own localization config.** If the site already has a
+`/.da/translate-v2.json` (the sheet the official DA localization app —
+[da.live/apps/loc](https://da.live/apps/loc), `adobe-rnd/da-locale-tools` — reads),
+Meridian reads it too: its `languages` sheet becomes the base target markets and each
+`locales` (region) row becomes a group (e.g. *Canada* → `de-ca`, `fr-ca`) with a
+one-click **All** in the market picker, and the coverage matrix shows every configured
+market — even ones not yet localized. No reconfiguration; Meridian just layers MT +
+quality gating + exposure on top. Sites with no `translate-v2.json` fall back to
+folder discovery + a common quick-pick list, exactly as before.
+
 Meridian reads `/meridian/config.json` (`{ canonicalId, policies: [{ locale, requiredLayers }] }`)
 and content under `/meridian/canon`, `/meridian/adapt/{locale}`, `/meridian/live/{locale}`.
 Two ways to stand that up:

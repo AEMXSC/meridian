@@ -63,12 +63,32 @@ const TAB_HELP = {
   taste: 'Machine changes waiting for your approval before they go live.',
 };
 
-// Common target languages offered as quick-pick chips (code + label).
+// Common target languages offered as quick-pick chips (code + label). Used only
+// as a fallback when the site has no DA locale config (/.da/translate-v2.json).
 const LANG_OPTIONS = [
   ['es', 'Spanish'], ['it', 'Italian'], ['fr', 'French'], ['de', 'German'],
   ['pt', 'Portuguese'], ['nl', 'Dutch'], ['ja', 'Japanese'], ['zh', 'Chinese'],
   ['ko', 'Korean'], ['ar', 'Arabic'],
 ];
+
+// Business-readable labels for the freshness states (the internal tokens stay
+// current/stale/missing). Aligned to the vocabulary the official DA loc app
+// uses so Meridian feels native next to it.
+const RISK_LABEL = { current: 'Live', stale: 'Update due', missing: 'Not localized' };
+const RISK_TIP = {
+  current: 'Localized page is published and up to date with the source.',
+  stale: 'Source changed after this market was localized — re-localize to refresh.',
+  missing: 'This market has no localized page yet.',
+};
+
+// A raw Last-Modified value (epoch ms or an RFC1123 header string) → a short
+// human date for a status tooltip, or '' when unknown.
+function formatWhen(value) {
+  if (value == null) return '';
+  const ms = typeof value === 'number' ? value : new Date(value).getTime();
+  if (Number.isNaN(ms)) return '';
+  return new Date(ms).toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' });
+}
 
 function parseDeepLink() {
   const params = new URLSearchParams(window.location.search);
@@ -120,6 +140,7 @@ class MeridianApp extends LitElement {
     _sites: { state: true },
     _recent: { state: true },
     _translate: { state: true },
+    _catalog: { state: true },
     _edge: { state: true },
     _pageRef: { state: true },
     _pageResults: { state: true },
@@ -168,6 +189,7 @@ class MeridianApp extends LitElement {
     this._recent = this.loadRecent();
     this._sites = [];
     this._translate = null;
+    this._catalog = null;
     this._edge = new Map();
     this._pageRef = 'international-banking';
     this._pageResults = new Map();
@@ -251,6 +273,7 @@ class MeridianApp extends LitElement {
     // coverage matrix or page index (they lazy-reload for the new site).
     this._matrix = null;
     this._matrixLocales = [];
+    this._catalog = null;
     this._allPages = null;
     this._pageRisk = [];
     this._bulkResults = [];
@@ -276,6 +299,7 @@ class MeridianApp extends LitElement {
       this.loadQueue();
       this.loadAdaptations();
       this.loadTranslate();
+      this.loadCatalog();
       this.loadEdgeStatus();
     } catch (e) {
       console.error(e);
@@ -395,6 +419,19 @@ class MeridianApp extends LitElement {
     } catch (e) {
       console.error('Failed to read DA translate config', e);
       this._translate = null;
+    }
+  }
+
+  // DA's localization config (/.da/translate-v2.json), normalized to Meridian
+  // locale tokens + region groups — the SAME sheet the official DA localization
+  // app reads, so a site already configured there needs no reconfiguration.
+  // Best-effort: a site with no config just falls back to folder discovery.
+  async loadCatalog() {
+    try {
+      this._catalog = await this.pageStore().localeCatalog();
+    } catch (e) {
+      console.error('Failed to read DA locale config', e);
+      this._catalog = null;
     }
   }
 
@@ -1157,6 +1194,51 @@ class MeridianApp extends LitElement {
     this._pageRisk = []; // language set changed; old status no longer matches
   }
 
+  // Select (or clear) a whole region group at once — the "publish all in a
+  // locale group" convenience the DA loc app offers, applied to Meridian's
+  // select-then-act flow. On when every code is already selected → toggles off.
+  toggleGroup(codes) {
+    const next = new Set(this._localeSel);
+    const allOn = codes.every((c) => next.has(c));
+    codes.forEach((c) => (allOn ? next.delete(c) : next.add(c)));
+    this._localeSel = next;
+    this._pageRisk = [];
+  }
+
+  renderChip(code, name) {
+    const on = this._localeSel.has(code);
+    return html`
+      <button class="mrd-lang-chip ${on ? 'on' : ''}"
+        aria-pressed=${on} aria-label=${name || code} title=${name || code}
+        ?disabled=${this._pageBusy} @click=${() => this.toggleLocale(code)}>${code}</button>`;
+  }
+
+  // Market picker: driven by the site's DA locale config when present (base
+  // languages, then each region group with a one-click "All"), else the common
+  // quick-pick fallback.
+  renderLangChips() {
+    const cat = this._catalog;
+    if (cat && (cat.languages.length || cat.groups.length)) {
+      return html`
+        ${cat.languages.length ? html`
+          <span class="mrd-lang-row">${cat.languages.map((l) => this.renderChip(l.code, l.name))}</span>
+        ` : nothing}
+        ${cat.groups.map((g) => {
+    const codes = g.locales.map((l) => l.code);
+    const allOn = codes.every((c) => this._localeSel.has(c));
+    return html`
+            <span class="mrd-lang-row">
+              <span class="mrd-lang-group-label">${g.name}</span>
+              <button class="mrd-lang-all ${allOn ? 'on' : ''}" aria-pressed=${allOn}
+                ?disabled=${this._pageBusy}
+                @click=${() => this.toggleGroup(codes)}>${allOn ? 'Clear' : 'All'}</button>
+              ${g.locales.map((l) => this.renderChip(l.code, l.name))}
+            </span>`;
+  })}`;
+    }
+    return html`${LANG_OPTIONS.map(([code, name]) => this.renderChip(code, name))}`;
+  }
+
   // The published edge URL of a source (English) page, for the side-by-side preview.
   pageEdgeUrl(ref) {
     // Reuse the shared, tested path guard rather than an ad-hoc clean.
@@ -1170,6 +1252,24 @@ class MeridianApp extends LitElement {
     this._toast = msg;
     clearTimeout(this._toastTimer);
     this._toastTimer = setTimeout(() => { this._toast = ''; }, 4000);
+  }
+
+  // Deep link straight into the DA editor for a materialized localized page (a
+  // scoped source path like /meridian/live/es/international-banking) so an author
+  // can hand-edit it — the "Edit" escape hatch the DA loc app offers.
+  daEditUrl(path) {
+    return `https://da.live/edit#/${this._org}/${this._site}${path}`;
+  }
+
+  // Copy a published link to the clipboard on demand (the DA loc app copies live
+  // URLs on publish); best-effort with a clear fallback message.
+  async copyLink(url) {
+    try {
+      await navigator.clipboard.writeText(url);
+      this.showToast('Live link copied to clipboard');
+    } catch {
+      this.showToast('Copy failed — open the link and copy it manually');
+    }
   }
 
   toggleSegEdit(locale) {
@@ -1576,6 +1676,11 @@ class MeridianApp extends LitElement {
             ${previewing ? 'Hide preview' : 'Preview'}
           </button>
           <a class="mrd-page-link" href=${r.liveUrl} target="_blank" rel="noopener">View live page ↗</a>
+          <button class="mrd-page-link-btn" ?disabled=${this._pageBusy}
+            @click=${() => this.copyLink(r.liveUrl)}>Copy link</button>
+          ${r.path ? html`
+            <a class="mrd-page-link" href=${this.daEditUrl(r.path)}
+              target="_blank" rel="noopener">Edit in DA ↗</a>` : nothing}
         </div>
         ${r.kind === 'translate' && r.review?.length ? html`
           <div class="mrd-entry-meta">
@@ -1723,13 +1828,9 @@ class MeridianApp extends LitElement {
           @click=${() => this.toggleBrowse()}>
           ${this._pageRef || 'Choose a page…'} <span class="mrd-tree-caret" aria-hidden="true">▾</span>
         </button>
-        <label id="mrd-lang-lbl">Languages</label>
+        <label id="mrd-lang-lbl">Markets</label>
         <span class="mrd-lang-chips" role="group" aria-labelledby="mrd-lang-lbl">
-          ${LANG_OPTIONS.map(([code, name]) => html`
-            <button class="mrd-lang-chip ${this._localeSel.has(code) ? 'on' : ''}"
-              aria-pressed=${this._localeSel.has(code)} aria-label=${name}
-              ?disabled=${this._pageBusy}
-              @click=${() => this.toggleLocale(code)}>${code}</button>`)}
+          ${this.renderLangChips()}
         </span>
       </div>
       ${this._browseOpen ? html`
@@ -1773,8 +1874,8 @@ class MeridianApp extends LitElement {
       ${this._pageRisk.length ? html`
         <div class="mrd-risk">
           ${this._pageRisk.map((r) => html`
-            <span class="mrd-risk-chip mrd-risk-${r.state}">
-              <span class="mrd-risk-locale">${r.locale}</span> ${r.state}
+            <span class="mrd-risk-chip mrd-risk-${r.state}" title=${RISK_TIP[r.state]}>
+              <span class="mrd-risk-locale">${r.locale}</span> ${RISK_LABEL[r.state]}
             </span>`)}
         </div>` : nothing}
       ${this._pageError ? html`<div class="nx-alert warning">${this._pageError}</div>` : nothing}
@@ -1801,7 +1902,13 @@ class MeridianApp extends LitElement {
     this._error = '';
     try {
       const store = this.pageStore();
-      const locales = await store.listLocales();
+      // Ensure the configured markets are known so the matrix shows every
+      // target from DA's locale config — even ones not yet localized — not just
+      // the folders that already exist.
+      if (this._catalog === null) await this.loadCatalog();
+      const discovered = await store.listLocales();
+      const configured = this._catalog?.all ?? [];
+      const locales = [...new Set([...configured, ...discovered])];
       this._matrixLocales = locales;
       this._matrix = locales.length ? await store.localizedMatrix(locales) : [];
     } catch (e) {
@@ -1834,10 +1941,10 @@ class MeridianApp extends LitElement {
           <div class="mrd-score">${locales.length}</div><div class="mrd-score-label">Markets</div>
         </div>
         <div class="mrd-scorecard mrd-warning">
-          <div class="mrd-score">${count('stale')}</div><div class="mrd-score-label">Stale</div>
+          <div class="mrd-score">${count('stale')}</div><div class="mrd-score-label">Update due</div>
         </div>
         <div class="mrd-scorecard">
-          <div class="mrd-score">${count('missing')}</div><div class="mrd-score-label">Missing</div>
+          <div class="mrd-score">${count('missing')}</div><div class="mrd-score-label">Not localized</div>
         </div>
         <sl-button class="primary outline mrd-matrix-refresh" ?disabled=${this._matrixBusy}
           @click=${() => this.loadMatrix()}>Refresh</sl-button>
@@ -1856,7 +1963,9 @@ class MeridianApp extends LitElement {
                     title="Open in Pages">${row.ref}</button>
                 </th>
                 ${row.cells.map((c) => html`
-                  <td><span class="mrd-risk-chip mrd-risk-${c.state}">${c.state}</span></td>`)}
+                  <td><span class="mrd-risk-chip mrd-risk-${c.state}"
+                    title=${c.at ? `${RISK_TIP[c.state]} (localized ${formatWhen(c.at)})` : RISK_TIP[c.state]}
+                  >${RISK_LABEL[c.state]}</span></td>`)}
               </tr>`)}
           </tbody>
         </table>

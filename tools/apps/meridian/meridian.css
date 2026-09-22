@@ -733,6 +733,25 @@
   text-decoration: underline;
 }
 
+.mrd-page-link-btn {
+  font: inherit;
+  font-weight: 700;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--mrd-accent);
+  cursor: pointer;
+}
+
+.mrd-page-link-btn:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.mrd-page-link-btn:hover:not(:disabled) {
+  text-decoration: underline;
+}
+
 .mrd-page-link-inline {
   color: var(--mrd-accent);
   font-weight: 700;
@@ -809,8 +828,45 @@
 /* Language quick-pick chips */
 .mrd-lang-chips {
   display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 6px;
+}
+
+/* One row per group (base languages, then each region group) */
+.mrd-lang-row {
+  display: flex;
   flex-wrap: wrap;
+  align-items: center;
   gap: 4px;
+}
+
+.mrd-lang-group-label {
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--mrd-text-muted);
+  margin-right: 4px;
+}
+
+.mrd-lang-all {
+  font: inherit;
+  font-size: 12px;
+  font-weight: 700;
+  padding: 3px 8px;
+  border: 1px dashed var(--mrd-border);
+  border-radius: var(--mrd-radius-pill);
+  background: var(--mrd-surface);
+  color: var(--mrd-text-muted);
+  cursor: pointer;
+}
+
+.mrd-lang-all.on,
+.mrd-lang-all:hover {
+  border-style: solid;
+  border-color: var(--mrd-accent);
+  color: var(--mrd-accent);
 }
 
 .mrd-lang-chip {

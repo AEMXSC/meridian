@@ -26,6 +26,7 @@ import { daFetch, DA_ORIGIN, AEM_ADMIN } from '../../msm/core/fetch.js';
 import { getPageTimestamp, getPageStatus, getStatusConfig } from '../../msm/core/status.js';
 import { previewPage, publishPage } from '../../msm/core/operations.js';
 import { upsertRows, readSheet } from './da-config.js';
+import { parseLocaleConfig } from './locale-config.js';
 import runWithConcurrency from './concurrency.js';
 
 // A single path segment: letters, digits, underscore, hyphen. No dots (blocks
@@ -271,6 +272,21 @@ export default class DaStore {
     return dntTerms(await this.readTranslateConfig());
   }
 
+  // DA's newer localization config (/.da/translate-v2.json) — the one the
+  // official DA localization app reads. Absent → null. Lives at the site root
+  // (not under the Meridian base), same as translate.json.
+  readLocaleConfigDoc() {
+    return this.#readJson('/.da/translate-v2.json');
+  }
+
+  // The configured target markets for this site, normalized to Meridian locale
+  // tokens + region groups (see core/locale-config.js). Empty catalog when the
+  // site has no translate-v2.json, so callers can always fall back to folder
+  // discovery.
+  async localeCatalog() {
+    return parseLocaleConfig(await this.readLocaleConfigDoc());
+  }
+
   // The localization risk radar for one page across markets: compares the
   // English source's edge timestamp to each localized page's, so an author sees
   // which markets are current, stale (source moved), or not yet localized —
@@ -503,10 +519,14 @@ export default class DaStore {
     await runWithConcurrency(tasks, 6);
     return refs.map((ref) => ({
       ref: assertPageRef(ref),
-      cells: locales.map((loc) => ({
-        locale: loc,
-        state: pageRiskState(srcMs.get(ref), cellMs.get(`${ref}|${loc}`)),
-      })),
+      cells: locales.map((loc) => {
+        const at = cellMs.get(`${ref}|${loc}`);
+        return {
+          locale: loc,
+          state: pageRiskState(srcMs.get(ref), at),
+          at: at ?? null,
+        };
+      }),
     }));
   }
 
