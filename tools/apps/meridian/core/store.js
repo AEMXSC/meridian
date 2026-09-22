@@ -442,11 +442,12 @@ export default class DaStore {
     const out = [];
     const walk = async (path) => {
       const nodes = await this.listPages(path).catch(() => []);
-      await Promise.all(nodes.map((n) => {
-        if (n.isFolder) return walk(n.path);
-        out.push(n.path.slice(base.length + 1).replace(/\.html$/, ''));
-        return null;
-      }));
+      const folders = [];
+      nodes.forEach((n) => {
+        if (n.isFolder) folders.push(n.path);
+        else out.push(n.path.slice(base.length + 1).replace(/\.html$/, ''));
+      });
+      await runWithConcurrency(folders.map((f) => () => walk(f)), 4);
     };
     await walk(base);
     return out;
@@ -459,14 +460,15 @@ export default class DaStore {
     const out = [];
     const walk = async (path) => {
       const nodes = await this.listPages(path).catch(() => []);
-      await Promise.all(nodes.map((n) => {
+      const folders = [];
+      nodes.forEach((n) => {
         if (n.isFolder) {
-          if (n.path === this.#base || n.name.startsWith('.')) return null;
-          return walk(n.path);
+          if (n.path !== this.#base && !n.name.startsWith('.')) folders.push(n.path);
+        } else {
+          out.push(n.path.replace(/^\/+/, '').replace(/\.html$/, ''));
         }
-        out.push(n.path.replace(/^\/+/, '').replace(/\.html$/, ''));
-        return null;
-      }));
+      });
+      await runWithConcurrency(folders.map((f) => () => walk(f)), 4);
     };
     await walk('');
     return [...new Set(out)].sort();

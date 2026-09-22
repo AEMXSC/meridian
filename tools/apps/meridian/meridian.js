@@ -1284,33 +1284,62 @@ class MeridianApp extends LitElement {
     this._pageError = '';
     this._bulkResults = [];
     this._pageResults = new Map();
-    const dnt = await ctx.store.readDnt().catch(() => []);
-    const tasks = [];
-    pages.forEach((p) => ctx.locales.forEach((locale) => {
-      tasks.push(async () => {
-        try {
-          const tm = await ctx.store.readTm(locale);
-          const tmt = createTmTranslator({ tm, translate: ctx.translate });
-          const source = await ctx.store.readPageHtml(p);
-          const out = await localizePage(source, tmt.translate, { to: locale, dnt });
-          const learned = new Map([...tmt.learned].filter(([s]) => out.dict.has(s)));
-          if (learned.size) await this.saveTm(ctx.store, tm, learned, 'mt', locale);
-          await ctx.store.writeLocalizedPage(locale, p, out.html);
-          const pub = await ctx.store.publishLocalizedPage(locale, p);
-          const pct = Math.round((out.coverage?.ratio ?? 0) * 100);
-          return {
-            ref: p, locale, ok: true, pct, liveUrl: pub.liveUrl,
-          };
-        } catch (e) {
-          return {
-            ref: p, locale, ok: false, error: e.message,
-          };
-        }
-      });
-    }));
     try {
+      const dnt = await ctx.store.readDnt().catch(() => []);
+      // Read each page's source ONCE (not once per locale).
+      const sourceByPage = new Map();
+      await runWithConcurrency(pages.map((p) => async () => {
+        try {
+          sourceByPage.set(p, await ctx.store.readPageHtml(p));
+        } catch {
+          sourceByPage.set(p, null);
+        }
+      }), 4);
+      // Read each locale's TM once and accumulate learnings to write back once,
+      // so concurrent page tasks for the same locale can't clobber each other.
+      const tmByLocale = new Map();
+      const learnedByLocale = new Map();
+      await runWithConcurrency(ctx.locales.map((locale) => async () => {
+        tmByLocale.set(locale, await ctx.store.readTm(locale));
+        learnedByLocale.set(locale, new Map());
+      }), 4);
+
+      const tasks = [];
+      pages.forEach((p) => ctx.locales.forEach((locale) => {
+        tasks.push(async () => {
+          const source = sourceByPage.get(p);
+          if (source == null) {
+            return {
+              ref: p, locale, ok: false, error: 'Could not read source page',
+            };
+          }
+          try {
+            const tmt = createTmTranslator({
+              tm: tmByLocale.get(locale), translate: ctx.translate,
+            });
+            const out = await localizePage(source, tmt.translate, { to: locale, dnt });
+            const acc = learnedByLocale.get(locale);
+            tmt.learned.forEach((t, s) => { if (out.dict.has(s)) acc.set(s, t); });
+            await ctx.store.writeLocalizedPage(locale, p, out.html);
+            const pub = await ctx.store.publishLocalizedPage(locale, p);
+            const pct = Math.round((out.coverage?.ratio ?? 0) * 100);
+            return {
+              ref: p, locale, ok: true, pct, liveUrl: pub.liveUrl,
+            };
+          } catch (e) {
+            return {
+              ref: p, locale, ok: false, error: e.message,
+            };
+          }
+        });
+      }));
       const settled = await runWithConcurrency(tasks, 3);
       this._bulkResults = settled.map((s) => s.value);
+      // One merged TM write per locale.
+      await runWithConcurrency(ctx.locales.map((locale) => async () => {
+        const acc = learnedByLocale.get(locale);
+        if (acc.size) await this.saveTm(ctx.store, tmByLocale.get(locale), acc, 'mt', locale);
+      }), 4);
       const ok = this._bulkResults.filter((r) => r.ok).length;
       this.showToast(`Bulk translated ${ok}/${this._bulkResults.length} page × market under ${folder || 'site'}`);
     } catch (e) {
@@ -1402,7 +1431,11 @@ class MeridianApp extends LitElement {
       const authored = Object.fromEntries(
         Object.entries(draft.overrides).filter(([src, v]) => {
           const val = (v ?? '').trim();
-          return val && val !== suggestions.get(src);
+          // Non-blank AND actually changed from what the machine produced —
+          // whether that's a flagged suggestion or a full segment's translation
+          // — so an untouched value is never published or stamped human TM.
+          const machine = String(draft.dict.get(src) ?? '').trim();
+          return val && val !== suggestions.get(src) && val !== machine;
         }),
       );
       const localizedHtml = applyLocalization(this._localizeSource, draft.dict, authored);
