@@ -156,10 +156,11 @@ async function handleReject(payload, token, request) {
 }
 
 // ---- Translation proxy (language layer) -------------------------------------
-// Keeps provider API keys server-side and avoids browser CORS. Provider order:
-// DeepL (DEEPL_KEY) -> Google Cloud v2 (GOOGLE_API_KEY) -> Google's keyless
-// endpoint. Any 3rd-party MT can be dropped in the same way. Per-string failures
-// fall back to the source text (partial coverage), never crashing the batch.
+// Keeps provider API keys server-side and avoids browser CORS. Auto provider
+// order: DeepL (DEEPL_KEY) -> Google Cloud v2 (GOOGLE_API_KEY) -> LibreTranslate
+// (LIBRETRANSLATE_URL, keyless & self-hostable) -> MyMemory keyless fallback.
+// Any 3rd-party MT can be dropped in the same way. Per-string failures fall back
+// to the source text (partial coverage), never crashing the batch.
 async function runLimited(items, limit, fn) {
   const results = new Array(items.length);
   let idx = 0;
@@ -205,6 +206,30 @@ async function translateGoogleV2(strings, from, to, key) {
   if (!r.ok) throw new Error(`Google Translate v2 failed (${r.status})`);
   const data = await r.json();
   return (data?.data?.translations || []).map((t, i) => t?.translatedText ?? strings[i]);
+}
+
+// LibreTranslate (open source, self-hostable) — the keyless option for testing
+// without a paid provider. Set LIBRETRANSLATE_URL to a reachable HTTPS instance
+// (e.g. a Railway/Fly deploy of the official libretranslate/libretranslate
+// image); LIBRETRANSLATE_KEY is optional (public instances that require one).
+// Sends the whole batch in one request; a shape mismatch falls back to source.
+async function translateLibre(strings, from, to, env) {
+  const base = String(env?.LIBRETRANSLATE_URL || '').replace(/\/$/, '');
+  const r = await fetch(`${base}/translate`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({
+      q: strings,
+      source: from.split('-')[0],
+      target: to.split('-')[0],
+      format: 'text',
+      ...(env?.LIBRETRANSLATE_KEY ? { api_key: env.LIBRETRANSLATE_KEY } : {}),
+    }),
+  });
+  if (!r.ok) throw new Error(`LibreTranslate failed (${r.status})`);
+  const data = await r.json();
+  const out = data?.translatedText;
+  return strings.map((s, i) => (Array.isArray(out) ? out[i] : out) ?? s);
 }
 
 async function translateDeepL(strings, to, key) {
@@ -265,6 +290,12 @@ async function handleTranslate(payload, request, env) {
     }
     translations = await translateGoogleV2(strings, from, to, env.GOOGLE_API_KEY);
     used = 'google';
+  } else if (provider === 'libre') {
+    if (!env?.LIBRETRANSLATE_URL) {
+      return json({ error: 'libre provider requires LIBRETRANSLATE_URL' }, 400, request);
+    }
+    translations = await translateLibre(strings, from, to, env);
+    used = 'libre';
   } else if (provider === 'free') {
     translations = await translateFree(strings, from, to);
     used = 'free';
@@ -274,6 +305,9 @@ async function handleTranslate(payload, request, env) {
   } else if (env?.GOOGLE_API_KEY) {
     translations = await translateGoogleV2(strings, from, to, env.GOOGLE_API_KEY);
     used = 'google';
+  } else if (env?.LIBRETRANSLATE_URL) {
+    translations = await translateLibre(strings, from, to, env);
+    used = 'libre';
   } else {
     translations = await translateFree(strings, from, to);
     used = 'free';
