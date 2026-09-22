@@ -138,6 +138,7 @@ class MeridianApp extends LitElement {
     _matrixBusy: { state: true },
     _allPages: { state: true },
     _treeQuery: { state: true },
+    _bulkResults: { state: true },
   };
 
   connectedCallback() {
@@ -183,6 +184,7 @@ class MeridianApp extends LitElement {
     this._matrixBusy = false;
     this._allPages = null;
     this._treeQuery = '';
+    this._bulkResults = [];
     this._localizeSource = '';
     this._localizeRef = '';
     // The store a Localize draft was staged against — captured so a later
@@ -1227,6 +1229,7 @@ class MeridianApp extends LitElement {
           return [locale, {
             ok: true,
             kind: 'translate',
+            locale,
             coverage: out.coverage,
             review: out.review,
             memory: tmLeverage(tmt.stats),
@@ -1241,6 +1244,59 @@ class MeridianApp extends LitElement {
       this._pageResults = new Map(settled.map((s) => s.value));
       const ok = [...this._pageResults.values()].filter((r) => r.ok).length;
       if (ok) this.showToast(`Translated & published ${ok} market(s) of ${ctx.ref}`);
+    } catch (e) {
+      this._pageError = e.message;
+    } finally {
+      this._pageBusy = false;
+    }
+  }
+
+  // BULK: translate + publish every page under the selected page's folder,
+  // across the chosen languages (fast path, language layer only). Capped and
+  // concurrency-limited. Results render in their own compact table.
+  async translateFolder() {
+    const ctx = this.pageInputs();
+    if (ctx.error) { this._pageError = ctx.error; return; }
+    if (this.guardPendingDrafts()) return;
+    await this.loadAllPages();
+    const folder = ctx.ref.includes('/') ? ctx.ref.slice(0, ctx.ref.lastIndexOf('/')) : '';
+    const pages = (this._allPages || [])
+      .filter((p) => (folder ? p === ctx.ref || p.startsWith(`${folder}/`) : true))
+      .slice(0, 25);
+    if (!pages.length) { this._pageError = 'No pages found to bulk-translate.'; return; }
+    this._pageBusy = true;
+    this._pageError = '';
+    this._bulkResults = [];
+    this._pageResults = new Map();
+    const dnt = await ctx.store.readDnt().catch(() => []);
+    const tasks = [];
+    pages.forEach((p) => ctx.locales.forEach((locale) => {
+      tasks.push(async () => {
+        try {
+          const tm = await ctx.store.readTm(locale);
+          const tmt = createTmTranslator({ tm, translate: ctx.translate });
+          const source = await ctx.store.readPageHtml(p);
+          const out = await localizePage(source, tmt.translate, { to: locale, dnt });
+          const learned = new Map([...tmt.learned].filter(([s]) => out.dict.has(s)));
+          if (learned.size) await this.saveTm(ctx.store, tm, learned, 'mt', locale);
+          await ctx.store.writeLocalizedPage(locale, p, out.html);
+          const pub = await ctx.store.publishLocalizedPage(locale, p);
+          const pct = Math.round((out.coverage?.ratio ?? 0) * 100);
+          return {
+            ref: p, locale, ok: true, pct, liveUrl: pub.liveUrl,
+          };
+        } catch (e) {
+          return {
+            ref: p, locale, ok: false, error: e.message,
+          };
+        }
+      });
+    }));
+    try {
+      const settled = await runWithConcurrency(tasks, 3);
+      this._bulkResults = settled.map((s) => s.value);
+      const ok = this._bulkResults.filter((r) => r.ok).length;
+      this.showToast(`Bulk translated ${ok}/${this._bulkResults.length} page × market under ${folder || 'site'}`);
     } catch (e) {
       this._pageError = e.message;
     } finally {
@@ -1542,7 +1598,31 @@ class MeridianApp extends LitElement {
         <sl-button ?disabled=${this._pageBusy} @click=${() => this.startLocalize()}>Localize</sl-button>
         <sl-button class="primary outline" ?disabled=${this._pageBusy}
           @click=${() => this.checkStatus()}>Check status</sl-button>
+        <sl-button class="primary outline" ?disabled=${this._pageBusy}
+          @click=${() => this.translateFolder()}>Translate folder</sl-button>
       </div>
+      ${this._bulkResults.length ? html`
+        <div class="mrd-section-label">Bulk translate — ${this._bulkResults.length} page × market</div>
+        <div class="mrd-matrix-wrap">
+          <table class="mrd-matrix">
+            <thead>
+              <tr><th scope="col">Page</th><th scope="col">Market</th><th scope="col">Result</th><th></th></tr>
+            </thead>
+            <tbody>
+              ${this._bulkResults.map((r) => html`
+                <tr>
+                  <td>${r.ref}</td>
+                  <td>${r.locale}</td>
+                  <td>${r.ok
+    ? html`<span class="mrd-risk-chip mrd-risk-current">${r.pct}%</span>`
+    : html`<span class="mrd-risk-chip mrd-risk-stale">failed</span>`}</td>
+                  <td>${r.ok
+    ? html`<a class="mrd-page-link-inline" href=${r.liveUrl} target="_blank" rel="noopener">view ↗</a>`
+    : r.error}</td>
+                </tr>`)}
+            </tbody>
+          </table>
+        </div>` : nothing}
       ${this._pageRisk.length ? html`
         <div class="mrd-risk">
           ${this._pageRisk.map((r) => html`
