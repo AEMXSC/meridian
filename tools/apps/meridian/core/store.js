@@ -57,6 +57,19 @@ export function assertSiteRef(org, site) {
   }
 }
 
+// A page reference is a site path of safe segments ("international-banking",
+// "student/checking"), with or without a leading slash / .html. Validated the
+// same way so a localized page can never escape its locale folder.
+export function assertPageRef(ref) {
+  const segs = typeof ref === 'string'
+    ? ref.replace(/^\/+/, '').replace(/\.html$/, '').split('/')
+    : [];
+  if (!segs.length || segs.some((seg) => !SAFE_SEGMENT.test(seg))) {
+    throw new Error(`Unsafe page ref: ${JSON.stringify(ref)}`);
+  }
+  return segs.join('/');
+}
+
 /** canonicalId always starts with "canon/"; the tail is the path reused under adapt/live. */
 function relPath(canonicalId) {
   return canonicalId.replace(/^canon\//, '');
@@ -83,6 +96,13 @@ export function livePath(base, locale, id) {
   assertLocale(locale);
   assertCanonicalId(id);
   return `${base}/live/${locale}/${relPath(id)}.json`;
+}
+
+// A localized full page (real HTML), materialized under the scoped base so it
+// never collides with the host site's own content: {base}/live/{locale}/{ref}.html
+export function localePagePath(base, locale, ref) {
+  assertLocale(locale);
+  return `${base}/live/${locale}/${assertPageRef(ref)}.html`;
 }
 
 export function queuePath(base, locale, id) {
@@ -258,6 +278,52 @@ export default class DaStore {
     };
     await del('live');
     await del('preview');
+  }
+
+  // ---- Real-page localization (whole EDS pages, not just JSON variants) -----
+
+  // Distinguish a genuine 404 (null) from auth/server errors (throw), same as
+  // #readJson, but for raw page HTML.
+  async #readText(path) {
+    const resp = await daFetch(this.#sourceUrl(path), { cache: 'no-store' });
+    if (resp.ok) return resp.text();
+    if (resp.status === 404) return null;
+    throw new Error(`Read failed for ${path} (${resp.status})`);
+  }
+
+  // The real English page's source HTML — the canonical for a whole-page
+  // localization. `ref` is a site path ("/international-banking"), NOT scoped to
+  // the Meridian base, because the source of truth is the host site's own page.
+  async readPageHtml(ref) {
+    const clean = assertPageRef(ref);
+    const html = await this.#readText(`/${clean}.html`);
+    if (html == null) throw new Error(`Page not found: /${clean}`);
+    return html;
+  }
+
+  // Write a localized page (real HTML) under {base}/live/{locale}/{ref}.html.
+  async writeLocalizedPage(locale, ref, html) {
+    const path = localePagePath(this.#base, locale, ref);
+    const body = new FormData();
+    body.append('data', new Blob([html], { type: 'text/html' }));
+    const resp = await daFetch(this.#sourceUrl(path), { method: 'PUT', body });
+    if (!resp.ok) throw new Error(`Write failed for ${path} (${resp.status})`);
+    return path;
+  }
+
+  // Push a localized page to the edge (preview then publish) and return the real
+  // live URL a visitor can open in that language.
+  async publishLocalizedPage(locale, ref) {
+    const path = localePagePath(this.#base, locale, ref).replace(/\.html$/, '');
+    const prev = await previewPage(this.#org, this.#site, path, 'html');
+    if (prev.error) throw new Error(`Preview failed for ${locale}: ${prev.error}`);
+    const pub = await publishPage(this.#org, this.#site, path, 'html');
+    if (pub.error) throw new Error(`Publish failed for ${locale}: ${pub.error}`);
+    return {
+      path,
+      previewUrl: `https://main--${this.#site}--${this.#org}.aem.page${path}`,
+      liveUrl: `https://main--${this.#site}--${this.#org}.aem.live${path}`,
+    };
   }
 
   // Taste queue: a gated recompute waiting on human judgement (PRD §6). One

@@ -18,6 +18,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
   canonPath, adaptPath, livePath, queuePath, rejectionPath, assertSiteRef,
+  localePagePath, assertPageRef,
 } from '../../tools/apps/meridian/core/store.js';
 
 const ID = 'canon/offers/spring-refresh';
@@ -39,6 +40,24 @@ test('path builders reject traversal and malformed segments', () => {
   assert.throws(() => livePath('/meridian', 'es_mx', 'canon/../secret'), /Unsafe canonicalId/);
   assert.throws(() => rejectionPath('/meridian', '../etc', ID), /Unsafe locale/);
   assert.throws(() => rejectionPath('/meridian', 'es_mx', 'canon/../secret'), /Unsafe canonicalId/);
+});
+
+test('localePagePath scopes a localized page under the locale folder', () => {
+  assert.equal(
+    localePagePath('/meridian', 'es', 'international-banking'),
+    '/meridian/live/es/international-banking.html',
+  );
+  // Tolerates a leading slash and an explicit .html, and nested page paths.
+  assert.equal(localePagePath('/meridian', 'it', '/international-banking.html'), '/meridian/live/it/international-banking.html');
+  assert.equal(localePagePath('/meridian', 'es', 'student/checking'), '/meridian/live/es/student/checking.html');
+});
+
+test('assertPageRef rejects traversal and malformed refs', () => {
+  assert.equal(assertPageRef('/international-banking.html'), 'international-banking');
+  assert.throws(() => assertPageRef('../../etc/passwd'), /Unsafe page ref/);
+  assert.throws(() => assertPageRef(''), /Unsafe page ref/);
+  assert.throws(() => assertPageRef('a/../b'), /Unsafe page ref/);
+  assert.throws(() => localePagePath('/meridian', 'es/mx', 'international-banking'), /Unsafe locale/);
 });
 
 test('assertSiteRef rejects org/site that could escape the site path', () => {

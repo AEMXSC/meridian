@@ -26,7 +26,10 @@ import createArchitect from './core/propose.js';
 import { readSheet } from './core/da-config.js';
 import runWithConcurrency from './core/concurrency.js';
 import { LAYER_PRECEDENCE } from './core/schemas.js';
+import { createTranslator } from './core/translate.js';
+import { localizePage } from './core/localize-page.js';
 import { icon } from '../msm/core/icons.js';
+import { daFetch } from '../msm/core/fetch.js';
 import 'https://da.live/nx/public/sl/components.js';
 
 const NX = 'https://da.live/nx';
@@ -51,7 +54,7 @@ try {
 
 // Deep-link org/site so an author arriving from the editor plugin never
 // re-enters context (the annoyance called out in the Experience Workspace demo).
-const TABS = ['exposure', 'taste', 'adapt'];
+const TABS = ['exposure', 'taste', 'adapt', 'pages'];
 
 function parseDeepLink() {
   const params = new URLSearchParams(window.location.search);
@@ -97,6 +100,11 @@ class MeridianApp extends LitElement {
     _recent: { state: true },
     _translate: { state: true },
     _edge: { state: true },
+    _pageRef: { state: true },
+    _pageLocales: { state: true },
+    _pageResults: { state: true },
+    _pageBusy: { state: true },
+    _pageError: { state: true },
   };
 
   connectedCallback() {
@@ -125,6 +133,11 @@ class MeridianApp extends LitElement {
     this._sites = [];
     this._translate = null;
     this._edge = new Map();
+    this._pageRef = 'international-banking';
+    this._pageLocales = 'es, it';
+    this._pageResults = new Map();
+    this._pageBusy = false;
+    this._pageError = '';
     // Deep-link / editor context wins; otherwise fall back to the most recent
     // org/site so a returning author lands where they left off.
     this._org = this._org || (this._recent[0]?.org ?? '');
@@ -682,6 +695,8 @@ class MeridianApp extends LitElement {
             @click=${() => { this._tab = 'taste'; }}>Taste queue${this._queue.length ? html` <span class="mrd-badge">${this._queue.length}</span>` : nothing}</button>
           <button class="mrd-tab ${this._tab === 'adapt' ? 'active' : ''}"
             @click=${() => { this._tab = 'adapt'; }}>Adaptations</button>
+          <button class="mrd-tab ${this._tab === 'pages' ? 'active' : ''}"
+            @click=${() => { this._tab = 'pages'; }}>Pages</button>
         </div>` : nothing}
       ${this._error ? html`<div class="nx-alert warning">${this._error}</div>` : nothing}
     `;
@@ -965,11 +980,112 @@ class MeridianApp extends LitElement {
     `;
   }
 
+  // Real whole-page localization: read the site's English page, translate the
+  // language layer (via the pluggable provider through the worker), hold
+  // commercial/compliance for sign-off, write + publish a real live page per
+  // locale. Per-locale failures are isolated (runWithConcurrency never rejects).
+  async localizePages() {
+    if (!this._org || !this._site) { this._pageError = 'Set org/site first.'; return; }
+    const ref = (this._pageRef || '').trim();
+    const locales = (this._pageLocales || '').split(',').map((s) => s.trim()).filter(Boolean);
+    if (!ref || !locales.length) { this._pageError = 'Enter a page and at least one locale.'; return; }
+    const store = this._store || new DaStore({ org: this._org, site: this._site });
+    this._store = store;
+    const translate = createTranslator(daFetch, { org: this._org, site: this._site });
+    this._pageBusy = true;
+    this._pageError = '';
+    this._pageResults = new Map();
+    try {
+      const source = await store.readPageHtml(ref);
+      const tasks = locales.map((locale) => async () => {
+        try {
+          const out = await localizePage(source, translate, { to: locale });
+          await store.writeLocalizedPage(locale, ref, out.html);
+          const pub = await store.publishLocalizedPage(locale, ref);
+          return [locale, {
+            ok: true, coverage: out.coverage, review: out.review, ...pub,
+          }];
+        } catch (e) {
+          return [locale, { ok: false, error: e.message }];
+        }
+      });
+      // runWithConcurrency resolves to allSettled wrappers; the tasks self-catch
+      // and never reject, so every settled value is our [locale, result] pair.
+      const settled = await runWithConcurrency(tasks, 3);
+      this._pageResults = new Map(settled.map((s) => s.value));
+    } catch (e) {
+      this._pageError = e.message;
+    } finally {
+      this._pageBusy = false;
+    }
+  }
+
+  renderPageResult(locale, r) {
+    if (!r.ok) {
+      return html`
+        <div class="mrd-market">
+          <div class="mrd-market-head">
+            <span class="mrd-locale">${locale}</span>
+            <span class="mrd-kind mrd-critical">failed</span>
+          </div>
+          <div class="mrd-detail">${r.error}</div>
+        </div>`;
+    }
+    const pct = Math.round((r.coverage?.ratio ?? 0) * 100);
+    return html`
+      <div class="mrd-market">
+        <div class="mrd-market-head">
+          <span class="mrd-locale">${locale}</span>
+          <span class="mrd-kind mrd-positive">published · ${pct}% translated</span>
+          <a class="mrd-page-link" href=${r.liveUrl} target="_blank" rel="noopener">View live page ↗</a>
+        </div>
+        ${r.review.length ? html`
+          <div class="mrd-entry-meta">
+            ${r.review.length} segment(s) held for human localization (kept in source language,
+            not machine-translated):
+          </div>
+          <div class="mrd-review">
+            ${r.review.map((seg) => html`
+              <div class="mrd-finding mrd-${seg.layer === 'compliance' ? 'critical' : 'warning'}">
+                <span class="mrd-kind">${seg.layer}</span>
+                <span class="mrd-detail">${seg.source}</span>
+              </div>`)}
+          </div>` : html`<div class="mrd-entry-meta">No commercial/compliance segments flagged.</div>`}
+      </div>`;
+  }
+
+  renderPages() {
+    return html`
+      <p class="mrd-adapt-intro">
+        Localize a real page from this site. Meridian translates the language layer, holds
+        commercial &amp; compliance segments for your sign-off, and publishes a real live URL per
+        market — computed fresh from the English source, never hand-maintained.
+      </p>
+      <div class="mrd-page-form">
+        <label for="pg-ref">Page</label>
+        <input id="pg-ref" class="mrd-scope-input mrd-page-input" .value=${this._pageRef}
+          @change=${(e) => { this._pageRef = e.target.value; }} ?disabled=${this._pageBusy} />
+        <label for="pg-locales">Locales</label>
+        <input id="pg-locales" class="mrd-scope-input mrd-page-input" .value=${this._pageLocales}
+          placeholder="es, it" @change=${(e) => { this._pageLocales = e.target.value; }}
+          ?disabled=${this._pageBusy} />
+        <sl-button ?disabled=${this._pageBusy} @click=${() => this.localizePages()}>
+          ${this._pageBusy ? 'Localizing…' : 'Localize & publish'}
+        </sl-button>
+      </div>
+      ${this._pageError ? html`<div class="nx-alert warning">${this._pageError}</div>` : nothing}
+      ${this._pageResults.size
+    ? html`<div class="mrd-list">${[...this._pageResults].map(([l, r]) => this.renderPageResult(l, r))}</div>`
+    : nothing}
+    `;
+  }
+
   renderContent() {
     if (this._state === 'init') return nothing;
     if (this._state === 'loading') return html`<div class="mrd-loading">Scanning ${this._org}/${this._site}…</div>`;
     if (this._tab === 'taste') return this.renderTaste();
     if (this._tab === 'adapt') return this.renderAdaptations();
+    if (this._tab === 'pages') return this.renderPages();
     return this.renderExposure();
   }
 

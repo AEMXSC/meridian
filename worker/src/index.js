@@ -31,11 +31,18 @@ const BASE = '/meridian';
 const SAFE_SEGMENT = /^[a-zA-Z0-9_-]+$/;
 
 const ALLOWED_ORIGINS = new Set(['https://da.live', 'http://localhost:3000']);
+// The app also runs from its own edge iframe (…--meridian--<org>.aem.live/.page),
+// so allow any Meridian app origin in addition to the static allow-list.
+const MERIDIAN_ORIGIN = /^https:\/\/[a-z0-9-]+--meridian--[a-z0-9-]+\.aem\.(live|page)$/;
+
+function allowOrigin(origin) {
+  return origin && (ALLOWED_ORIGINS.has(origin) || MERIDIAN_ORIGIN.test(origin));
+}
 
 function corsHeaders(request) {
   const origin = request.headers.get('Origin');
   return {
-    'Access-Control-Allow-Origin': ALLOWED_ORIGINS.has(origin) ? origin : 'https://da.live',
+    'Access-Control-Allow-Origin': allowOrigin(origin) ? origin : 'https://da.live',
     'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
     'Access-Control-Allow-Headers': 'Authorization, Content-Type',
   };
@@ -148,8 +155,113 @@ async function handleReject(payload, token, request) {
   }, 200, request);
 }
 
+// ---- Translation proxy (language layer) -------------------------------------
+// Keeps provider API keys server-side and avoids browser CORS. Provider order:
+// DeepL (DEEPL_KEY) -> Google Cloud v2 (GOOGLE_API_KEY) -> Google's keyless
+// endpoint. Any 3rd-party MT can be dropped in the same way. Per-string failures
+// fall back to the source text (partial coverage), never crashing the batch.
+async function runLimited(items, limit, fn) {
+  const results = new Array(items.length);
+  let idx = 0;
+  const worker = async () => {
+    while (idx < items.length) {
+      const i = idx;
+      idx += 1;
+      // eslint-disable-next-line no-await-in-loop -- sequential worker = the concurrency gate
+      results[i] = await fn(items[i], i);
+    }
+  };
+  await Promise.all(Array.from({ length: Math.min(limit, items.length) }, worker));
+  return results;
+}
+
+// Keyless default. Google's gtx endpoint 429s Cloudflare egress IPs, so we use
+// MyMemory (free, no key, server-side friendly). For production volume set
+// DEEPL_KEY or GOOGLE_API_KEY; a per-string failure falls back to source text.
+async function translateFree(strings, from, to) {
+  return runLimited(strings, 3, async (text) => {
+    try {
+      const u = `https://api.mymemory.translated.net/get?q=${encodeURIComponent(text)}&langpair=${encodeURIComponent(from)}|${encodeURIComponent(to)}`;
+      const r = await fetch(u, { headers: { 'User-Agent': 'Mozilla/5.0' } });
+      if (!r.ok) return text;
+      const data = await r.json();
+      const t = data?.responseData?.translatedText;
+      if (!t || /MYMEMORY WARNING|QUERY LENGTH LIMIT|INVALID/i.test(t)) return text;
+      return t;
+    } catch {
+      return text;
+    }
+  });
+}
+
+async function translateGoogleV2(strings, from, to, key) {
+  const r = await fetch(`https://translation.googleapis.com/language/translate/v2?key=${key}`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({
+      q: strings, source: from, target: to, format: 'text',
+    }),
+  });
+  if (!r.ok) throw new Error(`Google Translate v2 failed (${r.status})`);
+  const data = await r.json();
+  return (data?.data?.translations || []).map((t, i) => t?.translatedText ?? strings[i]);
+}
+
+async function translateDeepL(strings, to, key) {
+  const params = new URLSearchParams();
+  strings.forEach((s) => params.append('text', s));
+  params.set('target_lang', to.split('-')[0].toUpperCase());
+  const host = key.endsWith(':fx') ? 'https://api-free.deepl.com' : 'https://api.deepl.com';
+  const r = await fetch(`${host}/v2/translate`, {
+    method: 'POST',
+    headers: { Authorization: `DeepL-Auth-Key ${key}`, 'content-type': 'application/x-www-form-urlencoded' },
+    body: params,
+  });
+  if (!r.ok) throw new Error(`DeepL failed (${r.status})`);
+  const data = await r.json();
+  return (data?.translations || []).map((t, i) => t?.text ?? strings[i]);
+}
+
+// The /translate route does not forward the token to DA (it calls an MT
+// provider), so — unlike the queue routes — an invalid token would otherwise go
+// unnoticed, turning the endpoint into an open relay that burns the configured
+// provider's paid quota. Require the caller to actually have DA access to the
+// named site before honoring it.
+async function daAuthorized(token, org, site) {
+  if (!token || !SAFE_SEGMENT.test(org || '') || !SAFE_SEGMENT.test(site || '')) return false;
+  try {
+    const r = await fetch(`${DA_ORIGIN}/list/${org}/${site}/`, { headers: { Authorization: token } });
+    return r.ok;
+  } catch {
+    return false;
+  }
+}
+
+async function handleTranslate(payload, request, env) {
+  const {
+    strings, from = 'en', to, org, site,
+  } = payload || {};
+  if (!Array.isArray(strings) || !strings.length) return json({ error: 'strings[] required' }, 400, request);
+  if (!to || typeof to !== 'string') return json({ error: 'target locale (to) required' }, 400, request);
+  if (strings.length > 200) return json({ error: 'too many strings (max 200 per call)' }, 400, request);
+  const totalLen = strings.reduce((n, s) => n + (typeof s === 'string' ? s.length : 0), 0);
+  if (totalLen > 20000) return json({ error: 'payload too large (max 20k chars)' }, 400, request);
+  if (!(await daAuthorized(request.headers.get('Authorization'), org, site))) {
+    return json({ error: 'Unauthorized: a valid DA token with access to org/site is required' }, 401, request);
+  }
+  let translations;
+  if (env?.DEEPL_KEY) {
+    translations = await translateDeepL(strings, to, env.DEEPL_KEY);
+  } else if (env?.GOOGLE_API_KEY) {
+    translations = await translateGoogleV2(strings, from, to, env.GOOGLE_API_KEY);
+  } else {
+    translations = await translateFree(strings, from, to);
+  }
+  return json({ from, to, translations }, 200, request);
+}
+
 export default {
-  async fetch(request) {
+  async fetch(request, env) {
     if (request.method === 'OPTIONS') {
       return new Response(null, { status: 204, headers: corsHeaders(request) });
     }
@@ -166,6 +278,9 @@ export default {
       }
       if (request.method === 'POST' && url.pathname === '/api/queue/reject') {
         return await handleReject(await request.json(), token, request);
+      }
+      if (request.method === 'POST' && url.pathname === '/translate') {
+        return await handleTranslate(await request.json(), request, env);
       }
       return json({ error: 'Not found' }, 404, request);
     } catch (e) {
