@@ -26,6 +26,7 @@ import { daFetch, DA_ORIGIN, AEM_ADMIN } from '../../msm/core/fetch.js';
 import { getPageTimestamp, getPageStatus, getStatusConfig } from '../../msm/core/status.js';
 import { previewPage, publishPage } from '../../msm/core/operations.js';
 import { upsertRows, readSheet } from './da-config.js';
+import runWithConcurrency from './concurrency.js';
 
 // A single path segment: letters, digits, underscore, hyphen. No dots (blocks
 // `..` traversal), no slashes, no empties. Applied to locale and to every
@@ -475,20 +476,35 @@ export default class DaStore {
   // (columns), each cell current / stale / missing. The portfolio "radar".
   async localizedMatrix(locales) {
     const refSet = new Set();
-    await Promise.all(locales.map(async (loc) => {
+    await runWithConcurrency(locales.map((loc) => async () => {
       assertLocale(loc);
       (await this.#localizedRefs(loc)).forEach((r) => refSet.add(r));
-    }));
+    }), 4);
     const refs = [...refSet].sort();
-    return Promise.all(refs.map(async (ref) => {
+    // Bound the N pages × M locales timestamp lookups so a big site can't fire
+    // hundreds of DA requests at once (reuses MSM's concurrency limiter).
+    const srcMs = new Map();
+    const cellMs = new Map(); // `${ref}|${loc}` -> lastModified
+    const tasks = [];
+    refs.forEach((ref) => {
       const clean = assertPageRef(ref);
-      const src = await getPageTimestamp(this.#org, this.#site, `/${clean}`, 'html').catch(() => ({}));
-      const cells = await Promise.all(locales.map(async (loc) => {
+      tasks.push(async () => {
+        const src = await getPageTimestamp(this.#org, this.#site, `/${clean}`, 'html').catch(() => ({}));
+        srcMs.set(ref, src?.lastModified ?? null);
+      });
+      locales.forEach((loc) => tasks.push(async () => {
         const path = `${this.#base}/live/${loc}/${clean}`;
         const ts = await getPageTimestamp(this.#org, this.#site, path, 'html').catch(() => ({}));
-        return { locale: loc, state: pageRiskState(src?.lastModified, ts?.lastModified) };
+        cellMs.set(`${ref}|${loc}`, ts?.lastModified ?? null);
       }));
-      return { ref: clean, cells };
+    });
+    await runWithConcurrency(tasks, 6);
+    return refs.map((ref) => ({
+      ref: assertPageRef(ref),
+      cells: locales.map((loc) => ({
+        locale: loc,
+        state: pageRiskState(srcMs.get(ref), cellMs.get(`${ref}|${loc}`)),
+      })),
     }));
   }
 

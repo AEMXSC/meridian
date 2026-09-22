@@ -139,6 +139,7 @@ class MeridianApp extends LitElement {
     _allPages: { state: true },
     _treeQuery: { state: true },
     _bulkResults: { state: true },
+    _segEditOpen: { state: true },
   };
 
   connectedCallback() {
@@ -185,6 +186,7 @@ class MeridianApp extends LitElement {
     this._allPages = null;
     this._treeQuery = '';
     this._bulkResults = [];
+    this._segEditOpen = new Set();
     this._localizeSource = '';
     this._localizeRef = '';
     // The store a Localize draft was staged against — captured so a later
@@ -234,6 +236,13 @@ class MeridianApp extends LitElement {
     this._state = 'loading';
     this._error = '';
     this._diffs = new Map();
+    // Invalidate site-scoped caches so a site switch never shows another site's
+    // coverage matrix or page index (they lazy-reload for the new site).
+    this._matrix = null;
+    this._matrixLocales = [];
+    this._allPages = null;
+    this._pageRisk = [];
+    this._bulkResults = [];
     try {
       this._store = new DaStore({ org: this._org, site: this._site });
       const config = await this._store.readConfig();
@@ -1152,6 +1161,13 @@ class MeridianApp extends LitElement {
     this._toastTimer = setTimeout(() => { this._toast = ''; }, 4000);
   }
 
+  toggleSegEdit(locale) {
+    const next = new Set(this._segEditOpen);
+    if (next.has(locale)) next.delete(locale);
+    else next.add(locale);
+    this._segEditOpen = next;
+  }
+
   togglePreview(key) {
     const next = new Set(this._previewOpen);
     if (next.has(key)) next.delete(key);
@@ -1530,6 +1546,21 @@ class MeridianApp extends LitElement {
           </div>
           ${draft.review.map((seg) => this.renderOverride(locale, seg, draft))}
         ` : html`<div class="mrd-entry-meta">Nothing held — publish to finish.</div>`}
+        ${draft.dict && draft.dict.size ? html`
+          <button class="mrd-seg-toggle" @click=${() => this.toggleSegEdit(locale)}>
+            ${this._segEditOpen.has(locale) ? 'Hide' : 'Edit'} the ${draft.dict.size} translated segment(s)
+          </button>
+          ${this._segEditOpen.has(locale) ? html`
+            <div class="mrd-entry-meta">
+              Fix any machine translation before publishing — edits override the machine output.
+            </div>
+            ${[...draft.dict].map(([source, target]) => html`
+              <label class="mrd-override">
+                <span class="mrd-override-cap"><span class="mrd-kind">language</span> ${source}</span>
+                <textarea class="mrd-override-input" ?disabled=${this._pageBusy}
+                  .value=${draft.overrides[source] ?? target}
+                  @change=${(e) => this.setOverride(locale, source, e.target.value)}></textarea>
+              </label>`)}` : nothing}` : nothing}
       </div>`;
   }
 
@@ -1703,11 +1734,11 @@ class MeridianApp extends LitElement {
           <tbody>
             ${this._matrix.map((row) => html`
               <tr>
-                <td class="mrd-matrix-page">
+                <th scope="row" class="mrd-matrix-page">
                   <button class="mrd-matrix-link"
                     @click=${() => { this._pageRef = row.ref; this._pageRisk = []; this._tab = 'pages'; }}
                     title="Open in Pages">${row.ref}</button>
-                </td>
+                </th>
                 ${row.cells.map((c) => html`
                   <td><span class="mrd-risk-chip mrd-risk-${c.state}">${c.state}</span></td>`)}
               </tr>`)}
