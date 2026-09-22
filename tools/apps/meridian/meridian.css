@@ -116,6 +116,101 @@
   color: var(--mrd-text-muted);
 }
 
+/* Full-surface localization editor overlay */
+.mrd-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 90;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: var(--mrd-space-300);
+  background: rgb(0 0 0 / 45%);
+}
+
+.mrd-overlay-panel {
+  display: flex;
+  flex-direction: column;
+  width: min(900px, 100%);
+  max-height: 90vh;
+  background: var(--mrd-bg);
+  border-radius: var(--mrd-radius-card);
+  box-shadow: var(--mrd-shadow-raised);
+  overflow: hidden;
+}
+
+.mrd-overlay-head {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--mrd-space-200);
+  padding: var(--mrd-space-200) var(--mrd-space-300);
+  border-bottom: 1px solid var(--mrd-border);
+}
+
+.mrd-overlay-title {
+  font-size: 18px;
+  font-weight: 700;
+}
+
+.mrd-overlay-sub {
+  margin-top: 2px;
+  font-size: 13px;
+  color: var(--mrd-text-muted);
+}
+
+.mrd-overlay-close {
+  margin-left: auto;
+  font-size: 24px;
+  line-height: 1;
+  border: none;
+  background: none;
+  color: var(--mrd-text-muted);
+  cursor: pointer;
+}
+
+.mrd-overlay-body {
+  flex: 1;
+  overflow: auto;
+  padding: var(--mrd-space-100) var(--mrd-space-300);
+}
+
+.mrd-overlay-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: var(--mrd-space-200);
+  align-items: start;
+  padding: var(--mrd-space-200) 0;
+  border-bottom: 1px solid var(--mrd-surface-sunken);
+}
+
+.mrd-overlay-srctext {
+  margin-top: 4px;
+  font-size: 14px;
+  color: #4b4b4b;
+}
+
+.mrd-overlay-input {
+  width: 100%;
+  box-sizing: border-box;
+  min-height: 60px;
+  font: inherit;
+  font-size: 14px;
+  padding: 8px 10px;
+  border: 1px solid var(--mrd-border);
+  border-radius: var(--mrd-radius-control);
+  background: var(--mrd-surface);
+  color: var(--mrd-text);
+  resize: vertical;
+}
+
+.mrd-overlay-foot {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--mrd-space-100);
+  padding: var(--mrd-space-200) var(--mrd-space-300);
+  border-top: 1px solid var(--mrd-border);
+}
+
 /* Transient success toast */
 .mrd-toast {
   position: fixed;

@@ -140,6 +140,7 @@ class MeridianApp extends LitElement {
     _treeQuery: { state: true },
     _bulkResults: { state: true },
     _segEditOpen: { state: true },
+    _overlayLocale: { state: true },
   };
 
   connectedCallback() {
@@ -187,6 +188,7 @@ class MeridianApp extends LitElement {
     this._treeQuery = '';
     this._bulkResults = [];
     this._segEditOpen = new Set();
+    this._overlayLocale = '';
     this._localizeSource = '';
     this._localizeRef = '';
     // The store a Localize draft was staged against — captured so a later
@@ -752,19 +754,19 @@ class MeridianApp extends LitElement {
         <div class="mrd-tabs" role="tablist">
           <button role="tab" aria-selected=${this._tab === 'overview'}
             class="mrd-tab ${this._tab === 'overview' ? 'active' : ''}"
-            @click=${() => { this._tab = 'overview'; }}>Overview</button>
+            @click=${() => { this._tab = 'overview'; }}>Dashboard</button>
           <button role="tab" aria-selected=${this._tab === 'exposure'}
             class="mrd-tab ${this._tab === 'exposure' ? 'active' : ''}"
-            @click=${() => { this._tab = 'exposure'; }}>Exposure</button>
+            @click=${() => { this._tab = 'exposure'; }}>Issues</button>
           <button role="tab" aria-selected=${this._tab === 'taste'}
             class="mrd-tab ${this._tab === 'taste' ? 'active' : ''}"
-            @click=${() => { this._tab = 'taste'; }}>Taste queue${this._queue.length ? html` <span class="mrd-badge">${this._queue.length}</span>` : nothing}</button>
+            @click=${() => { this._tab = 'taste'; }}>Approvals${this._queue.length ? html` <span class="mrd-badge">${this._queue.length}</span>` : nothing}</button>
           <button role="tab" aria-selected=${this._tab === 'adapt'}
             class="mrd-tab ${this._tab === 'adapt' ? 'active' : ''}"
-            @click=${() => { this._tab = 'adapt'; }}>Adaptations</button>
+            @click=${() => { this._tab = 'adapt'; }}>Market rules</button>
           <button role="tab" aria-selected=${this._tab === 'pages'}
             class="mrd-tab ${this._tab === 'pages' ? 'active' : ''}"
-            @click=${() => { this._tab = 'pages'; }}>Pages</button>
+            @click=${() => { this._tab = 'pages'; }}>Localize</button>
         </div>
         ${TAB_HELP[this._tab] ? html`<div class="mrd-tab-help">${TAB_HELP[this._tab]}</div>` : nothing}` : nothing}
       ${this._error ? html`<div class="nx-alert warning">${this._error}</div>` : nothing}
@@ -1168,6 +1170,71 @@ class MeridianApp extends LitElement {
     this._segEditOpen = next;
   }
 
+  async publishFromOverlay(locale) {
+    await this.publishLocalized(locale);
+    if (!this._localizeDrafts.has(locale)) this._overlayLocale = '';
+  }
+
+  // A readable, full-surface editor for one market's localization: every
+  // segment as source | editable translation, with layer + quality context.
+  // (The rendered preview is cross-origin, so it can't be edited in place; this
+  // overlay is the editable counterpart to it.)
+  renderOverlay() {
+    const locale = this._overlayLocale;
+    if (!locale) return nothing;
+    const draft = this._localizeDrafts.get(locale);
+    if (!draft?.ok) return nothing;
+    const rows = [
+      ...[...draft.dict].map(([source, target]) => ({ source, layer: 'language', machine: target })),
+      ...draft.review.map((seg) => ({
+        source: seg.source, layer: seg.layer, machine: seg.suggested ?? '', issues: seg.issues,
+      })),
+    ];
+    const pct = Math.round((draft.coverage?.ratio ?? 0) * 100);
+    const sev = (l) => {
+      if (l === 'compliance') return 'mrd-critical';
+      if (l === 'commercial') return 'mrd-warning';
+      return '';
+    };
+    return html`
+      <div class="mrd-overlay"
+        @click=${(e) => { if (e.target.classList.contains('mrd-overlay')) this._overlayLocale = ''; }}>
+        <div class="mrd-overlay-panel" role="dialog" aria-modal="true"
+          aria-label="Edit ${locale} localization">
+          <div class="mrd-overlay-head">
+            <div>
+              <div class="mrd-overlay-title">Review &amp; edit — ${locale}</div>
+              <div class="mrd-overlay-sub">${this._pageRef} · language ${pct}% · ${rows.length} segment(s)</div>
+            </div>
+            <button class="mrd-overlay-close" aria-label="Close"
+              @click=${() => { this._overlayLocale = ''; }}>×</button>
+          </div>
+          <div class="mrd-overlay-body">
+            ${rows.map((r) => html`
+              <div class="mrd-overlay-row">
+                <div class="mrd-overlay-src">
+                  <span class="mrd-kind ${sev(r.layer)}">${r.layer}</span>
+                  <div class="mrd-overlay-srctext">${r.source}</div>
+                  ${r.issues?.length
+    ? html`<div class="mrd-override-issues">${r.issues.map((i) => i.detail).join('; ')}</div>` : nothing}
+                </div>
+                <textarea class="mrd-overlay-input" ?disabled=${this._pageBusy}
+                  placeholder=${r.layer === 'language' ? `${locale} translation` : `Market ${r.layer} text`}
+                  .value=${draft.overrides[r.source] ?? r.machine ?? ''}
+                  @change=${(e) => this.setOverride(locale, r.source, e.target.value)}></textarea>
+              </div>`)}
+          </div>
+          <div class="mrd-overlay-foot">
+            <sl-button class="primary outline" ?disabled=${this._pageBusy}
+              @click=${() => { this._overlayLocale = ''; }}>Close</sl-button>
+            <sl-button ?disabled=${this._pageBusy} @click=${() => this.publishFromOverlay(locale)}>
+              ${this._pageBusy ? 'Publishing…' : `Publish ${locale}`}
+            </sl-button>
+          </div>
+        </div>
+      </div>`;
+  }
+
   togglePreview(key) {
     const next = new Set(this._previewOpen);
     if (next.has(key)) next.delete(key);
@@ -1566,7 +1633,9 @@ class MeridianApp extends LitElement {
           <span class="mrd-kind mrd-positive">
             language ${pct}% translated${draft.memory ? ` · ${draft.memory}% from memory` : ''}
           </span>
-          <sl-button class="mrd-page-publish" ?disabled=${this._pageBusy}
+          <sl-button class="mrd-page-publish primary outline" ?disabled=${this._pageBusy}
+            @click=${() => { this._overlayLocale = locale; }}>Review &amp; edit</sl-button>
+          <sl-button ?disabled=${this._pageBusy}
             @click=${() => this.publishLocalized(locale)}>
             ${this._pageBusy ? 'Publishing…' : `Publish ${locale}`}
           </sl-button>
@@ -1793,6 +1862,7 @@ class MeridianApp extends LitElement {
   render() {
     return html`
       ${this.renderToolbar()}${this.renderContent()}
+      ${this.renderOverlay()}
       ${this._toast ? html`<div class="mrd-toast" role="status">${this._toast}</div>` : nothing}`;
   }
 }
