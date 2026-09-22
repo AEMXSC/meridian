@@ -105,6 +105,13 @@ export function localePagePath(base, locale, ref) {
   return `${base}/live/${locale}/${assertPageRef(ref)}.html`;
 }
 
+// Translation Memory lives once per locale at the site level (shared across all
+// pages), so an identical segment is translated once and reused everywhere.
+export function tmPath(base, locale) {
+  assertLocale(locale);
+  return `${base}/tm/${locale}.json`;
+}
+
 export function queuePath(base, locale, id) {
   assertLocale(locale);
   assertCanonicalId(id);
@@ -324,6 +331,19 @@ export default class DaStore {
       previewUrl: `https://main--${this.#site}--${this.#org}.aem.page${path}`,
       liveUrl: `https://main--${this.#site}--${this.#org}.aem.live${path}`,
     };
+  }
+
+  // ---- Translation Memory ---------------------------------------------------
+
+  // The locale's TM (source segment -> approved translation), or a fresh empty
+  // one when the site has none yet.
+  async readTm(locale) {
+    const doc = await this.#readJson(tmPath(this.#base, locale));
+    return doc || { locale, entries: {} };
+  }
+
+  writeTm(tm) {
+    return this.#writeJson(tmPath(this.#base, tm.locale), tm);
   }
 
   // Taste queue: a gated recompute waiting on human judgement (PRD §6). One

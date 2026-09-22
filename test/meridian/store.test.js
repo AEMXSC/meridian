@@ -18,7 +18,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
   canonPath, adaptPath, livePath, queuePath, rejectionPath, assertSiteRef,
-  localePagePath, assertPageRef,
+  localePagePath, assertPageRef, tmPath,
 } from '../../tools/apps/meridian/core/store.js';
 
 const ID = 'canon/offers/spring-refresh';
@@ -50,6 +50,11 @@ test('localePagePath scopes a localized page under the locale folder', () => {
   // Tolerates a leading slash and an explicit .html, and nested page paths.
   assert.equal(localePagePath('/meridian', 'it', '/international-banking.html'), '/meridian/live/it/international-banking.html');
   assert.equal(localePagePath('/meridian', 'es', 'student/checking'), '/meridian/live/es/student/checking.html');
+});
+
+test('tmPath scopes translation memory per locale under the base', () => {
+  assert.equal(tmPath('/meridian', 'es'), '/meridian/tm/es.json');
+  assert.throws(() => tmPath('/meridian', '../etc'), /Unsafe locale/);
 });
 
 test('assertPageRef rejects traversal and malformed refs', () => {

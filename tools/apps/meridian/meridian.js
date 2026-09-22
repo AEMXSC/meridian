@@ -28,6 +28,7 @@ import runWithConcurrency from './core/concurrency.js';
 import { LAYER_PRECEDENCE } from './core/schemas.js';
 import { createTranslator } from './core/translate.js';
 import { localizePage, applyLocalization, hasPendingOverrides } from './core/localize-page.js';
+import { createTmTranslator, record as tmRecord, lookup as tmLookup } from './core/tm.js';
 import { icon } from '../msm/core/icons.js';
 import { daFetch } from '../msm/core/fetch.js';
 import 'https://da.live/nx/public/sl/components.js';
@@ -72,6 +73,13 @@ function entryValueString(value) {
   if (value === undefined || value === null) return '';
   if (typeof value === 'string') return value;
   return JSON.stringify(value, null, 2);
+}
+
+// TM leverage: percent of segments served from Translation Memory (vs sent to
+// the provider) — the cost/consistency win, surfaced in the result badge.
+function tmLeverage({ hits, misses }) {
+  const total = hits + misses;
+  return total ? Math.round((hits / total) * 100) : 0;
 }
 
 class MeridianApp extends LitElement {
@@ -992,7 +1000,9 @@ class MeridianApp extends LitElement {
   pageInputs() {
     if (!this._org || !this._site) return { error: 'Set org/site first.' };
     const ref = (this._pageRef || '').trim();
-    const locales = (this._pageLocales || '').split(',').map((s) => s.trim()).filter(Boolean);
+    const locales = [...new Set(
+      (this._pageLocales || '').split(',').map((s) => s.trim()).filter(Boolean),
+    )];
     if (!ref || !locales.length) return { error: 'Enter a page and at least one locale.' };
     const store = this._store || new DaStore({ org: this._org, site: this._site });
     this._store = store;
@@ -1020,6 +1030,17 @@ class MeridianApp extends LitElement {
     this._pageError = '';
   }
 
+  // TM is an asset/cache layer — a save failure must never fail the primary
+  // translate/publish path, so persistence is best-effort and only warns.
+  // eslint-disable-next-line class-methods-use-this
+  async saveTm(store, tm, updates, origin, locale) {
+    try {
+      await store.writeTm(tmRecord(tm, updates, { origin, locale }));
+    } catch (e) {
+      console.warn(`Translation memory save failed for ${locale}:`, e.message);
+    }
+  }
+
   async translatePages() {
     const ctx = this.pageInputs();
     if (ctx.error) { this._pageError = ctx.error; return; }
@@ -1032,11 +1053,20 @@ class MeridianApp extends LitElement {
       const source = await ctx.store.readPageHtml(ctx.ref);
       const tasks = ctx.locales.map((locale) => async () => {
         try {
-          const out = await localizePage(source, ctx.translate, { to: locale });
+          const tm = await ctx.store.readTm(locale);
+          const tmt = createTmTranslator({ tm, translate: ctx.translate });
+          const out = await localizePage(source, tmt.translate, { to: locale });
+          // Learn the fresh machine translations back into TM for reuse (best-effort).
+          if (tmt.learned.size) await this.saveTm(ctx.store, tm, tmt.learned, 'mt', locale);
           await ctx.store.writeLocalizedPage(locale, ctx.ref, out.html);
           const pub = await ctx.store.publishLocalizedPage(locale, ctx.ref);
           return [locale, {
-            ok: true, kind: 'translate', coverage: out.coverage, review: out.review, ...pub,
+            ok: true,
+            kind: 'translate',
+            coverage: out.coverage,
+            review: out.review,
+            memory: tmLeverage(tmt.stats),
+            ...pub,
           }];
         } catch (e) {
           return [locale, { ok: false, error: e.message }];
@@ -1068,9 +1098,22 @@ class MeridianApp extends LitElement {
       this._localizeStore = ctx.store;
       const tasks = ctx.locales.map((locale) => async () => {
         try {
-          const out = await localizePage(this._localizeSource, ctx.translate, { to: locale });
+          const tm = await ctx.store.readTm(locale);
+          const tmt = createTmTranslator({ tm, translate: ctx.translate });
+          const out = await localizePage(this._localizeSource, tmt.translate, { to: locale });
+          if (tmt.learned.size) await this.saveTm(ctx.store, tm, tmt.learned, 'mt', locale);
+          // Prefill the market (commercial/compliance) fields from any prior
+          // human sign-off in TM — reuse, not re-authoring.
+          const overrides = Object.fromEntries(
+            tmLookup(tm, out.review.map((seg) => seg.source)).hits,
+          );
           return [locale, {
-            ok: true, dict: out.dict, review: out.review, coverage: out.coverage, overrides: {},
+            ok: true,
+            dict: out.dict,
+            review: out.review,
+            coverage: out.coverage,
+            memory: tmLeverage(tmt.stats),
+            overrides,
           }];
         } catch (e) {
           return [locale, { ok: false, error: e.message }];
@@ -1105,19 +1148,28 @@ class MeridianApp extends LitElement {
       const localizedHtml = applyLocalization(this._localizeSource, draft.dict, draft.overrides);
       await store.writeLocalizedPage(locale, this._localizeRef, localizedHtml);
       const pub = await store.publishLocalizedPage(locale, this._localizeRef);
-      const heldDone = draft.review
-        .filter((seg) => (draft.overrides[seg.source] || '').trim()).length;
+      // Commit the successful publish (result + drop the draft) BEFORE touching
+      // TM, so a TM hiccup can never mislabel a live page as failed or lose the
+      // draft.
+      const authored = Object.fromEntries(
+        Object.entries(draft.overrides).filter(([, v]) => v && String(v).trim()),
+      );
+      const heldDone = Object.keys(authored).length;
       this._pageResults = new Map(this._pageResults).set(locale, {
         ok: true,
         kind: 'localize',
         coverage: draft.coverage,
         heldTotal: draft.review.length,
         heldDone,
+        memory: draft.memory,
         ...pub,
       });
       const drafts = new Map(this._localizeDrafts);
       drafts.delete(locale);
       this._localizeDrafts = drafts;
+      // Human sign-off becomes durable TM (origin human), reused next run — but
+      // it is best-effort: the page is already live.
+      if (heldDone) await this.saveTm(store, await store.readTm(locale), authored, 'human', locale);
     } catch (e) {
       this._pageError = `Publish failed for ${locale}: ${e.message}`;
     } finally {
@@ -1137,9 +1189,10 @@ class MeridianApp extends LitElement {
         </div>`;
     }
     const pct = Math.round((r.coverage?.ratio ?? 0) * 100);
+    const mem = r.memory ? ` · ${r.memory}% from memory` : '';
     const badge = r.kind === 'localize'
-      ? `localized · language ${pct}% · market ${r.heldDone}/${r.heldTotal}`
-      : `translated · language ${pct}%`;
+      ? `localized · language ${pct}% · market ${r.heldDone}/${r.heldTotal}${mem}`
+      : `translated · language ${pct}%${mem}`;
     return html`
       <div class="mrd-market">
         <div class="mrd-market-head">
@@ -1171,7 +1224,9 @@ class MeridianApp extends LitElement {
       <div class="mrd-market">
         <div class="mrd-market-head">
           <span class="mrd-locale">${locale}</span>
-          <span class="mrd-kind mrd-positive">language ${pct}% translated</span>
+          <span class="mrd-kind mrd-positive">
+            language ${pct}% translated${draft.memory ? ` · ${draft.memory}% from memory` : ''}
+          </span>
           <sl-button class="mrd-page-publish" ?disabled=${this._pageBusy}
             @click=${() => this.publishLocalized(locale)}>
             ${this._pageBusy ? 'Publishing…' : `Publish ${locale}`}
@@ -1179,7 +1234,8 @@ class MeridianApp extends LitElement {
         </div>
         ${draft.review.length ? html`
           <div class="mrd-entry-meta">
-            Author the ${draft.review.length} market segment(s) — the machine never writes these:
+            Author the ${draft.review.length} market segment(s) — the machine never writes these
+            (prefilled from memory where you've signed off before):
           </div>
           ${draft.review.map((seg) => html`
             <label class="mrd-override">
