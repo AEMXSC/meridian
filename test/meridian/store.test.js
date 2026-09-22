@@ -64,6 +64,17 @@ test('pageRiskState flags missing / stale / current localized pages vs the sourc
   assert.equal(pageRiskState(null, 1000), 'current', 'no source timestamp → not stale');
 });
 
+test('pageRiskState compares real Last-Modified date strings chronologically, not lexically', () => {
+  // Source is chronologically NEWER (Jan 2026) but its weekday prefix ("Fri")
+  // sorts BEFORE the localized page's ("Mon") — a naive string compare would
+  // wrongly say "current". Chronologically it must be "stale".
+  const sourceNewer = 'Fri, 02 Jan 2026 00:00:00 GMT';
+  const localizedOlder = 'Mon, 01 Dec 2025 00:00:00 GMT';
+  assert.equal(pageRiskState(sourceNewer, localizedOlder), 'stale');
+  assert.equal(pageRiskState(localizedOlder, sourceNewer), 'current');
+  assert.equal(pageRiskState(sourceNewer, null), 'missing');
+});
+
 test('dntTerms extracts do-not-translate terms from translate.json, tolerant of the column name', () => {
   assert.deepEqual(dntTerms(null), [], 'no config → no terms');
   const doc = {

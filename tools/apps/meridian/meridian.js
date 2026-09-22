@@ -16,7 +16,7 @@
 /* eslint-disable no-underscore-dangle, import/no-unresolved, no-console, class-methods-use-this */
 import DA_SDK from 'https://da.live/nx/utils/sdk.js';
 import { LitElement, html, nothing } from 'da-lit';
-import DaStore, { listSites } from './core/store.js';
+import DaStore, { listSites, assertPageRef } from './core/store.js';
 import scanCanonical from './core/scan.js';
 import variantStatus from './core/variant-status.js';
 import { diffVariants, onlyChanges } from './core/diff.js';
@@ -1068,6 +1068,7 @@ class MeridianApp extends LitElement {
   selectPage(node) {
     this._pageRef = node.path.replace(/^\/+/, '').replace(/\.html$/, '');
     this._browseOpen = false;
+    this._pageRisk = []; // status chips referred to the previous page
   }
 
   toggleLocale(code) {
@@ -1075,11 +1076,13 @@ class MeridianApp extends LitElement {
     if (next.has(code)) next.delete(code);
     else next.add(code);
     this._localeSel = next;
+    this._pageRisk = []; // language set changed; old status no longer matches
   }
 
   // The published edge URL of a source (English) page, for the side-by-side preview.
   pageEdgeUrl(ref) {
-    const clean = (ref || '').replace(/^\/+/, '').replace(/\.html$/, '');
+    // Reuse the shared, tested path guard rather than an ad-hoc clean.
+    const clean = assertPageRef(ref);
     return `https://main--${this._site}--${this._org}.aem.live/${clean}`;
   }
 
@@ -1331,12 +1334,14 @@ class MeridianApp extends LitElement {
             <div class="mrd-preview-pane">
               <div class="mrd-preview-label">Source (English)</div>
               <iframe class="mrd-preview-frame" title="Source page ${locale}"
-                src=${r.sourceUrl} loading="lazy"></iframe>
+                src=${r.sourceUrl} loading="lazy"
+                sandbox="allow-scripts allow-same-origin" referrerpolicy="no-referrer"></iframe>
             </div>
             <div class="mrd-preview-pane">
               <div class="mrd-preview-label">${locale} (localized)</div>
               <iframe class="mrd-preview-frame" title="Localized page ${locale}"
-                src=${r.liveUrl} loading="lazy"></iframe>
+                src=${r.liveUrl} loading="lazy"
+                sandbox="allow-scripts allow-same-origin" referrerpolicy="no-referrer"></iframe>
             </div>
           </div>
           <div class="mrd-entry-meta">

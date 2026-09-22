@@ -115,7 +115,18 @@ export function tmPath(base, locale) {
 // Exposure over a REAL localized page: is the published localized page current
 // with its English source, stale (source changed after it), or not yet made?
 // Pure so the decision is unit-testable; the timestamps come from getPageTimestamp.
-export function pageRiskState(sourceMs, localizedMs) {
+export function pageRiskState(source, localized) {
+  // Accept epoch ms OR a raw Last-Modified header string — compare
+  // CHRONOLOGICALLY, never lexicographically (RFC1123 weekday prefixes don't
+  // sort by date). Mirrors msm/core/status.js's toTime conversion.
+  const toMs = (v) => {
+    if (v == null) return null;
+    if (typeof v === 'number') return v;
+    const t = new Date(v).getTime();
+    return Number.isNaN(t) ? null : t;
+  };
+  const sourceMs = toMs(source);
+  const localizedMs = toMs(localized);
   if (!localizedMs) return 'missing';
   if (sourceMs && sourceMs > localizedMs) return 'stale';
   return 'current';
