@@ -112,6 +112,15 @@ export function tmPath(base, locale) {
   return `${base}/tm/${locale}.json`;
 }
 
+// Exposure over a REAL localized page: is the published localized page current
+// with its English source, stale (source changed after it), or not yet made?
+// Pure so the decision is unit-testable; the timestamps come from getPageTimestamp.
+export function pageRiskState(sourceMs, localizedMs) {
+  if (!localizedMs) return 'missing';
+  if (sourceMs && sourceMs > localizedMs) return 'stale';
+  return 'current';
+}
+
 // Extract do-not-translate terms from DA's localization config
 // (/.da/translate.json `dnt-content-rules` sheet). Pure + tolerant of the
 // column name (DA loc sheets vary): prefer a term-ish column, else the first
@@ -248,6 +257,22 @@ export default class DaStore {
   // a protected term is held for human review, never published. Empty on absence.
   async readDnt() {
     return dntTerms(await this.readTranslateConfig());
+  }
+
+  // The localization risk radar for one page across markets: compares the
+  // English source's edge timestamp to each localized page's, so an author sees
+  // which markets are current, stale (source moved), or not yet localized —
+  // exposure over the real published pages. Reuses MSM's getPageTimestamp.
+  async pageRisk(ref, locales) {
+    const clean = assertPageRef(ref);
+    const src = await getPageTimestamp(this.#org, this.#site, `/${clean}`, 'html').catch(() => ({}));
+    const sourceMs = src?.lastModified ?? null;
+    return Promise.all(locales.map(async (locale) => {
+      assertLocale(locale);
+      const path = `${this.#base}/live/${locale}/${clean}`;
+      const ts = await getPageTimestamp(this.#org, this.#site, path, 'html').catch(() => ({}));
+      return { locale, state: pageRiskState(sourceMs, ts?.lastModified ?? null) };
+    }));
   }
 
   async registerLanguage(locale, name) {

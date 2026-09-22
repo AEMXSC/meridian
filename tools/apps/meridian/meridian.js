@@ -125,6 +125,7 @@ class MeridianApp extends LitElement {
     _pageTree: { state: true },
     _pageExpanded: { state: true },
     _previewOpen: { state: true },
+    _pageRisk: { state: true },
   };
 
   connectedCallback() {
@@ -163,6 +164,7 @@ class MeridianApp extends LitElement {
     this._pageTree = new Map();
     this._pageExpanded = new Set();
     this._previewOpen = new Set();
+    this._pageRisk = [];
     this._localizeSource = '';
     this._localizeRef = '';
     // The store a Localize draft was staged against — captured so a later
@@ -1088,6 +1090,22 @@ class MeridianApp extends LitElement {
     this._previewOpen = next;
   }
 
+  // Localization risk radar: for the chosen page + languages, is each market's
+  // published page current / stale (source moved) / not yet localized.
+  async checkStatus() {
+    const ctx = this.pageInputs();
+    if (ctx.error) { this._pageError = ctx.error; return; }
+    this._pageBusy = true;
+    this._pageError = '';
+    try {
+      this._pageRisk = await ctx.store.pageRisk(ctx.ref, ctx.locales);
+    } catch (e) {
+      this._pageError = e.message;
+    } finally {
+      this._pageBusy = false;
+    }
+  }
+
   // TRANSLATE: language layer only, published immediately (the fast path). The
   // withheld commercial/compliance segments stay in the source language.
   // Refuse to discard hand-authored, unpublished overrides silently. Returns
@@ -1445,7 +1463,16 @@ class MeridianApp extends LitElement {
         <sl-button class="primary outline" ?disabled=${this._pageBusy}
           @click=${() => this.translatePages()}>Translate &amp; publish</sl-button>
         <sl-button ?disabled=${this._pageBusy} @click=${() => this.startLocalize()}>Localize</sl-button>
+        <sl-button class="primary outline" ?disabled=${this._pageBusy}
+          @click=${() => this.checkStatus()}>Check status</sl-button>
       </div>
+      ${this._pageRisk.length ? html`
+        <div class="mrd-risk">
+          ${this._pageRisk.map((r) => html`
+            <span class="mrd-risk-chip mrd-risk-${r.state}">
+              <span class="mrd-risk-locale">${r.locale}</span> ${r.state}
+            </span>`)}
+        </div>` : nothing}
       ${this._pageError ? html`<div class="nx-alert warning">${this._pageError}</div>` : nothing}
       ${this._localizeDrafts.size ? html`
         <div class="mrd-section-label">

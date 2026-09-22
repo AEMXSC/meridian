@@ -18,7 +18,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
   canonPath, adaptPath, livePath, queuePath, rejectionPath, assertSiteRef,
-  localePagePath, assertPageRef, tmPath, dntTerms,
+  localePagePath, assertPageRef, tmPath, dntTerms, pageRiskState,
 } from '../../tools/apps/meridian/core/store.js';
 
 const ID = 'canon/offers/spring-refresh';
@@ -55,6 +55,13 @@ test('localePagePath scopes a localized page under the locale folder', () => {
 test('tmPath scopes translation memory per locale under the base', () => {
   assert.equal(tmPath('/meridian', 'es'), '/meridian/tm/es.json');
   assert.throws(() => tmPath('/meridian', '../etc'), /Unsafe locale/);
+});
+
+test('pageRiskState flags missing / stale / current localized pages vs the source', () => {
+  assert.equal(pageRiskState(1000, null), 'missing', 'never localized');
+  assert.equal(pageRiskState(2000, 1000), 'stale', 'source changed after localization');
+  assert.equal(pageRiskState(1000, 2000), 'current', 'localized after the source');
+  assert.equal(pageRiskState(null, 1000), 'current', 'no source timestamp → not stale');
 });
 
 test('dntTerms extracts do-not-translate terms from translate.json, tolerant of the column name', () => {

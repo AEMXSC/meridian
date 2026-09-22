@@ -703,6 +703,44 @@
   margin-bottom: var(--mrd-space-200);
 }
 
+/* Localization risk radar chips */
+.mrd-risk {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: var(--mrd-space-200);
+}
+
+.mrd-risk-chip {
+  font-size: 12px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  padding: 3px 10px;
+  border-radius: var(--mrd-radius-pill);
+}
+
+.mrd-risk-chip .mrd-risk-locale {
+  font-weight: 700;
+  text-transform: none;
+  letter-spacing: 0;
+}
+
+.mrd-risk-current {
+  background: var(--mrd-positive-tint);
+  color: var(--mrd-positive);
+}
+
+.mrd-risk-stale {
+  background: var(--mrd-warning-tint);
+  color: #b06f00;
+}
+
+.mrd-risk-missing {
+  background: var(--mrd-surface-sunken);
+  color: var(--mrd-text-muted);
+}
+
 /* Page tree */
 .mrd-tree {
   margin-bottom: var(--mrd-space-200);
