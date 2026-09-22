@@ -62,6 +62,26 @@ Two ways to stand that up:
   on-ramp) to import a source doc + per-market copies into one canonical object plus
   typed adaptation sets, with no hand rebuild.
 
+## Translation provider (pluggable)
+
+The language layer is produced by a real machine-translation provider, proxied
+through the Meridian worker so keys stay server-side (and browser CORS is a
+non-issue). The worker's `/translate` endpoint resolves a provider in this order,
+and a caller may force one via a `provider` field (`deepl` | `google` | `free` |
+`auto`):
+
+1. **DeepL** — set `wrangler secret put DEEPL_KEY` (recommended; free tier available).
+2. **Google Cloud Translation** — set `GOOGLE_API_KEY`.
+3. **Keyless fallback** — used when no key is set (rate-limited; fine for a demo).
+
+**Bring your own engine / TMS:** the provider is the single extension point.
+`core/translate.js` (`createTranslator`) is pluggable client-side, and the worker's
+provider functions (`translateDeepL` / `translateGoogleV2` / `translateFree`) are the
+server-side seam — add a `translate<Yours>` that calls your MT or TMS (Smartling,
+Phrase, a private model) and wire it into `handleTranslate`. Only the **language**
+layer is machine-translated; commercial/compliance stay human-owned (PRD §11), and
+every machine result is quality-gated before publish.
+
 ## Invariant
 
 Materialized variants are artifacts: delete `/meridian/live` and recompute from

@@ -239,7 +239,7 @@ async function daAuthorized(token, org, site) {
 
 async function handleTranslate(payload, request, env) {
   const {
-    strings, from = 'en', to, org, site,
+    strings, from = 'en', to, org, site, provider = 'auto',
   } = payload || {};
   if (!Array.isArray(strings) || !strings.length) return json({ error: 'strings[] required' }, 400, request);
   if (!to || typeof to !== 'string') return json({ error: 'target locale (to) required' }, 400, request);
@@ -249,15 +249,38 @@ async function handleTranslate(payload, request, env) {
   if (!(await daAuthorized(request.headers.get('Authorization'), org, site))) {
     return json({ error: 'Unauthorized: a valid DA token with access to org/site is required' }, 401, request);
   }
+  // Explicit provider overrides the fallback chain; 'auto' (or omitted/unknown)
+  // keeps the existing DeepL -> Google -> free order. `used` reports what ran.
   let translations;
-  if (env?.DEEPL_KEY) {
+  let used;
+  if (provider === 'deepl') {
+    if (!env?.DEEPL_KEY) {
+      return json({ error: 'deepl provider requires DEEPL_KEY' }, 400, request);
+    }
     translations = await translateDeepL(strings, to, env.DEEPL_KEY);
+    used = 'deepl';
+  } else if (provider === 'google') {
+    if (!env?.GOOGLE_API_KEY) {
+      return json({ error: 'google provider requires GOOGLE_API_KEY' }, 400, request);
+    }
+    translations = await translateGoogleV2(strings, from, to, env.GOOGLE_API_KEY);
+    used = 'google';
+  } else if (provider === 'free') {
+    translations = await translateFree(strings, from, to);
+    used = 'free';
+  } else if (env?.DEEPL_KEY) {
+    translations = await translateDeepL(strings, to, env.DEEPL_KEY);
+    used = 'deepl';
   } else if (env?.GOOGLE_API_KEY) {
     translations = await translateGoogleV2(strings, from, to, env.GOOGLE_API_KEY);
+    used = 'google';
   } else {
     translations = await translateFree(strings, from, to);
+    used = 'free';
   }
-  return json({ from, to, translations }, 200, request);
+  return json({
+    from, to, provider: used, translations,
+  }, 200, request);
 }
 
 export default {
