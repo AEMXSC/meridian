@@ -200,6 +200,15 @@ class MeridianApp extends LitElement {
     this._site = this._site || (this._recent[0]?.site ?? '');
     // Scan is triggered by init() once the DA session is (or isn't) available —
     // not here — so the toolbar always renders even without a DA context.
+    // Escape closes the editor overlay (WAI-ARIA dialog behaviour).
+    this._onKeydown = (e) => { if (e.key === 'Escape' && this._overlayLocale) this._overlayLocale = ''; };
+    window.addEventListener('keydown', this._onKeydown);
+  }
+
+  disconnectedCallback() {
+    super.disconnectedCallback();
+    window.removeEventListener('keydown', this._onKeydown);
+    clearTimeout(this._toastTimer);
   }
 
   // Recent org/site pairs, persisted in localStorage so the picker can suggest
@@ -1204,7 +1213,9 @@ class MeridianApp extends LitElement {
           <div class="mrd-overlay-head">
             <div>
               <div class="mrd-overlay-title">Review &amp; edit — ${locale}</div>
-              <div class="mrd-overlay-sub">${this._pageRef} · language ${pct}% · ${rows.length} segment(s)</div>
+              <div class="mrd-overlay-sub">
+              ${this._pageRef} · language ${pct}% · ${rows.length} segment(s) · leave a field blank to keep the source
+            </div>
             </div>
             <button class="mrd-overlay-close" aria-label="Close"
               @click=${() => { this._overlayLocale = ''; }}>×</button>
@@ -1219,11 +1230,14 @@ class MeridianApp extends LitElement {
     ? html`<div class="mrd-override-issues">${r.issues.map((i) => i.detail).join('; ')}</div>` : nothing}
                 </div>
                 <textarea class="mrd-overlay-input" ?disabled=${this._pageBusy}
-                  placeholder=${r.layer === 'language' ? `${locale} translation` : `Market ${r.layer} text`}
+                  placeholder=${r.layer === 'language'
+    ? `${locale} translation (blank = keep source)`
+    : `Market ${r.layer} text for ${locale} (blank = keep source)`}
                   .value=${draft.overrides[r.source] ?? r.machine ?? ''}
                   @change=${(e) => this.setOverride(locale, r.source, e.target.value)}></textarea>
               </div>`)}
           </div>
+          ${this._pageError ? html`<div class="nx-alert warning mrd-overlay-error">${this._pageError}</div>` : nothing}
           <div class="mrd-overlay-foot">
             <sl-button class="primary outline" ?disabled=${this._pageBusy}
               @click=${() => { this._overlayLocale = ''; }}>Close</sl-button>
@@ -1634,7 +1648,7 @@ class MeridianApp extends LitElement {
             language ${pct}% translated${draft.memory ? ` · ${draft.memory}% from memory` : ''}
           </span>
           <sl-button class="mrd-page-publish primary outline" ?disabled=${this._pageBusy}
-            @click=${() => { this._overlayLocale = locale; }}>Review &amp; edit</sl-button>
+            @click=${() => { this._pageError = ''; this._overlayLocale = locale; }}>Review &amp; edit</sl-button>
           <sl-button ?disabled=${this._pageBusy}
             @click=${() => this.publishLocalized(locale)}>
             ${this._pageBusy ? 'Publishing…' : `Publish ${locale}`}
