@@ -136,6 +136,8 @@ class MeridianApp extends LitElement {
     _matrix: { state: true },
     _matrixLocales: { state: true },
     _matrixBusy: { state: true },
+    _allPages: { state: true },
+    _treeQuery: { state: true },
   };
 
   connectedCallback() {
@@ -179,6 +181,8 @@ class MeridianApp extends LitElement {
     this._matrix = null;
     this._matrixLocales = [];
     this._matrixBusy = false;
+    this._allPages = null;
+    this._treeQuery = '';
     this._localizeSource = '';
     this._localizeRef = '';
     // The store a Localize draft was staged against — captured so a later
@@ -1075,6 +1079,36 @@ class MeridianApp extends LitElement {
   toggleBrowse() {
     this._browseOpen = !this._browseOpen;
     if (this._browseOpen && !this._pageTree.has('')) this.loadFolder('');
+    if (this._browseOpen) this.loadAllPages();
+  }
+
+  async loadAllPages() {
+    if (this._allPages !== null || !this._org || !this._site) return;
+    try {
+      this._allPages = await this.pageStore().allPages();
+    } catch {
+      this._allPages = [];
+    }
+  }
+
+  renderTreeSearch() {
+    if (this._allPages === null) return html`<div class="mrd-tree-note">Indexing pages…</div>`;
+    const q = this._treeQuery.trim().toLowerCase();
+    const matches = this._allPages.filter((p) => p.toLowerCase().includes(q)).slice(0, 50);
+    if (!matches.length) return html`<div class="mrd-tree-note">No pages match “${this._treeQuery}”.</div>`;
+    return html`<ul class="mrd-tree-list" role="group">
+      ${matches.map((ref) => html`
+        <li role="none">
+          <button class="mrd-tree-page ${ref === this._pageRef ? 'sel' : ''}" role="treeitem"
+            aria-selected=${ref === this._pageRef}
+            @click=${() => {
+    this._pageRef = ref;
+    this._browseOpen = false;
+    this._treeQuery = '';
+    this._pageRisk = [];
+  }}>${ref}</button>
+        </li>`)}
+    </ul>`;
   }
 
   toggleFolder(path) {
@@ -1496,7 +1530,12 @@ class MeridianApp extends LitElement {
         </span>
       </div>
       ${this._browseOpen ? html`
-        <div class="mrd-tree" role="tree" aria-label="Site pages">${this.renderTreeLevel('')}</div>` : nothing}
+        <div class="mrd-tree" role="tree" aria-label="Site pages">
+          <input class="mrd-tree-search" type="search" placeholder="Search pages…"
+            aria-label="Search pages" .value=${this._treeQuery}
+            @input=${(e) => { this._treeQuery = e.target.value; }} />
+          ${this._treeQuery.trim() ? this.renderTreeSearch() : this.renderTreeLevel('')}
+        </div>` : nothing}
       <div class="mrd-page-actions">
         <sl-button class="primary outline" ?disabled=${this._pageBusy}
           @click=${() => this.translatePages()}>Translate &amp; publish</sl-button>

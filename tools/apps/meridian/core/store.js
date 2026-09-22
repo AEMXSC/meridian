@@ -451,6 +451,26 @@ export default class DaStore {
     return out;
   }
 
+  // Every real .html page on the site (recursive, site-relative refs, no .html),
+  // for the page-search box. Skips the Meridian base (our own artifacts) and
+  // dot-folders. Small sites only — fine to walk on demand.
+  async allPages() {
+    const out = [];
+    const walk = async (path) => {
+      const nodes = await this.listPages(path).catch(() => []);
+      await Promise.all(nodes.map((n) => {
+        if (n.isFolder) {
+          if (n.path === this.#base || n.name.startsWith('.')) return null;
+          return walk(n.path);
+        }
+        out.push(n.path.replace(/^\/+/, '').replace(/\.html$/, ''));
+        return null;
+      }));
+    };
+    await walk('');
+    return [...new Set(out)].sort();
+  }
+
   // The coverage matrix: every localized page (rows) × the given locales
   // (columns), each cell current / stale / missing. The portfolio "radar".
   async localizedMatrix(locales) {
