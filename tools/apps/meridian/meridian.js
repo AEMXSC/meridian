@@ -198,6 +198,11 @@ class MeridianApp extends LitElement {
     this._tab = parseDeepLink().tab;
     this._queue = [];
     this._promotions = [];
+    // Promotion requests we just wrote but DA's /list index may not reflect yet
+    // (the source PUT lands before the list endpoint reindexes). Keyed
+    // locale:ref; an entry stays here until a server list confirms it, so a
+    // lagging reload never drops a request the author just filed.
+    this._pendingPromoKeys = new Set();
     this._queueBusy = new Set();
     this._rejectingKey = '';
     this._layers = new Map();
@@ -319,6 +324,7 @@ class MeridianApp extends LitElement {
     this._allPages = null;
     this._pageRisk = [];
     this._bulkResults = [];
+    this._pendingPromoKeys = new Set();
     // Page-scoped state is per-site too — reset it so a scan never carries the
     // previous site's selected page, page tree, or results forward (e.g. the
     // citizens default "international-banking" leaking onto another org's site).
@@ -389,7 +395,20 @@ class MeridianApp extends LitElement {
     }
     // Page-promotion requests are a separate, whole-page approval stream.
     try {
-      this._promotions = await this._store.listPromotions();
+      const server = await this._store.listPromotions();
+      const keyOf = (p) => `${p.locale}:${p.ref}`;
+      const serverKeys = new Set(server.map(keyOf));
+      // Once the server list reflects a request, stop treating it as pending —
+      // from then on server truth governs it (so another reviewer's approval
+      // can remove it from this author's view).
+      this._pendingPromoKeys = new Set(
+        [...this._pendingPromoKeys].filter((k) => !serverKeys.has(k)),
+      );
+      // Keep just-filed requests the list index hasn't caught up to yet.
+      const pendingExtras = this._promotions.filter(
+        (p) => this._pendingPromoKeys.has(keyOf(p)) && !serverKeys.has(keyOf(p)),
+      );
+      this._promotions = [...server, ...pendingExtras];
     } catch (e) {
       console.error('Failed to load promotion requests', e);
     }
@@ -906,7 +925,7 @@ class MeridianApp extends LitElement {
             @click=${() => { this._tab = 'exposure'; }}>Issues</button>
           <button role="tab" aria-selected=${this._tab === 'taste'}
             class="mrd-tab ${this._tab === 'taste' ? 'active' : ''}"
-            @click=${() => { this._tab = 'taste'; }}>Approvals${(this._queue.length + (this._promotions?.length || 0)) ? html` <span class="mrd-badge">${this._queue.length + (this._promotions?.length || 0)}</span>` : nothing}</button>
+            @click=${() => this.openApprovals()}>Approvals${(this._queue.length + (this._promotions?.length || 0)) ? html` <span class="mrd-badge">${this._queue.length + (this._promotions?.length || 0)}</span>` : nothing}</button>
           <button role="tab" aria-selected=${this._tab === 'adapt'}
             class="mrd-tab ${this._tab === 'adapt' ? 'active' : ''}"
             @click=${() => { this._tab = 'adapt'; }}>Market rules</button>
@@ -1588,6 +1607,22 @@ class MeridianApp extends LitElement {
     }
   }
 
+  // Remove a promotion request from the local view + pending set (after it's
+  // been approved/rejected server-side) so the pending-merge in loadQueue can't
+  // resurrect it.
+  dropPromotion(locale, ref) {
+    const key = `${locale}:${ref}`;
+    this._pendingPromoKeys = new Set([...this._pendingPromoKeys].filter((k) => k !== key));
+    this._promotions = this._promotions.filter((p) => `${p.locale}:${p.ref}` !== key);
+  }
+
+  // Open the Approvals tab and refresh from the server so a reviewer sees
+  // requests filed since the last load (the tab is otherwise passive).
+  openApprovals() {
+    this._tab = 'taste';
+    this.loadQueue();
+  }
+
   // Request approval instead of promoting directly (governed path): file a
   // promotion request a different reviewer approves in the Approvals tab.
   async requestPromotion(locale, ref) {
@@ -1595,16 +1630,23 @@ class MeridianApp extends LitElement {
     this._pageError = '';
     try {
       this._pageBusyMsg = `Requesting approval for ${locale}…`;
-      await this.storeForSite(this.siteForLocale(locale)).writePromotionRequest({
+      const record = {
         ref,
         locale,
         site: this.siteForLocale(locale),
         requestedBy: (this.context && this.context.user && this.context.user.email) || 'author',
         at: Date.now(),
-      });
+      };
+      await this.storeForSite(this.siteForLocale(locale)).writePromotionRequest(record);
+      // Show it in Approvals immediately. DA's /list index lags a fresh source
+      // write, so we can't rely on a reload here — insert optimistically and
+      // track it as pending until a later server list confirms it.
+      const key = `${locale}:${ref}`;
+      this._pendingPromoKeys = new Set(this._pendingPromoKeys).add(key);
+      const others = this._promotions.filter((p) => `${p.locale}:${p.ref}` !== key);
+      this._promotions = [...others, record];
       this.patchResult(locale, { requested: true });
       this.showToast(`Approval requested for ${locale} — a reviewer can approve it in Approvals.`);
-      this.loadQueue();
     } catch (e) {
       this._pageError = `Could not request approval for ${locale}: ${e.message}`;
     } finally {
@@ -1622,6 +1664,7 @@ class MeridianApp extends LitElement {
       await store.promotePage(item.locale, item.ref);
       await this.saveManagedGrouped([{ ref: item.ref, locale: item.locale, mode: 'locale-root' }]);
       await store.removePromotionRequest(item.locale, item.ref);
+      this.dropPromotion(item.locale, item.ref);
       this.showToast(`Approved & promoted ${item.locale} / ${item.ref} → live`);
       await this.loadQueue();
     } catch (e) {
@@ -1640,6 +1683,7 @@ class MeridianApp extends LitElement {
     try {
       await this.storeForSite(item.site || this.siteForLocale(item.locale))
         .removePromotionRequest(item.locale, item.ref);
+      this.dropPromotion(item.locale, item.ref);
       await this.loadQueue();
     } catch (e) {
       this._error = `Reject failed: ${e.message}`;
