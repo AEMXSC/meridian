@@ -15,11 +15,13 @@ like the other apps in `adobe-rnd/aem-apps`. All content it manages is scoped un
 
 | Surface | Where | Does |
 | --- | --- | --- |
-| Full-page app | `tools/apps/meridian/meridian.html` | Exposure queue · Taste queue · Adaptations (authoring + New-market setup) |
+| Full-page app | `tools/apps/meridian/meridian.html` | Five tabs: **Dashboard** (staged/live coverage) · **Pages** (Translate / Localize / Promote) · **Issues** (exposure) · **Approvals** (promotion requests + taste queue) · **Market rules** (adaptation authoring + New-market setup) |
 | Prepare-menu plugin | `tools/plugins/meridian/meridian.html` | Per-page exposure summary + deep-link into the app |
-| Engine | `tools/apps/meridian/core/` | schemas · hash · materialize · exposure · scan · diff · propagate · scoring · classify · propose · migrate |
-| MCP tools | `agents/` | `exposure_scan`, `propagation_plan/apply/rollback`, `locale_propose`, `migrate_ingest` |
-| Queue worker | `worker/` | DA-backed taste-queue REST (approve/reject with IMS identity) |
+| Engine | `tools/apps/meridian/core/` | Pure, node-testable JS (no DA/https imports): `schemas`, `hash`, `materialize`, `exposure`, `scan`, `diff`, `propagate`, `scoring`, `classify`, `propose`, `migrate`, `locale-config`, `quality`, `tm`, `eds-html`, `localize-page`, `managed`, `variant-status`, `da-config`, `concurrency` |
+| DA client | `tools/apps/meridian/core/store.js` | `DaStore` — all DA reads/writes + preview/publish; injectable `fetchImpl` for tests |
+| Translation client | `tools/apps/meridian/core/translate.js` | `createTranslator` — posts to the worker `/translate` (pluggable provider) |
+| Worker | `worker/src/index.js` | `/translate` (MT provider chain), `/glossary` (build a DeepL glossary), `/api/queue/*` (taste-queue approve/reject with the caller's IMS identity) |
+| Integration | `tools/apps/meridian/integration/hreflang.js` | Runtime drop-in for a host site's `scripts.js` — injects reciprocal hreflang from the published index |
 
 ## Install it on your site (any org)
 
@@ -167,3 +169,75 @@ Guardrails on every write to a live locale path:
 
 Materialized variants are artifacts: delete `/meridian/live` and recompute from
 `/meridian/canon` + `/meridian/adapt` → byte-identical output. Guarded by tests.
+
+## Data model (what lives where in the DA source)
+
+Everything Meridian owns is namespaced under `/meridian` in the target site so it
+never collides with the host site's own content:
+
+| Path | What |
+| --- | --- |
+| `/meridian/config.json` | Market policy set + options: `{ canonicalId, policies:[{locale, requiredLayers}], sourceLocale?, publishMode?, formality?, glossaries? }` |
+| `/meridian/canon/…` | Canonical content objects (the single source per piece of content) |
+| `/meridian/adapt/{locale}/…` | Typed per-market adaptation layers |
+| `/meridian/live/{locale}/…` | Materialized variants + **sandbox** localized pages (the review staging area) |
+| `/meridian/tm/{locale}.json` | Translation Memory (source→approved translation, content-addressed) |
+| `/meridian/managed.json` | Manifest of every page Meridian materialized (`{ref, locale, mode, at}`) — drives the coverage dashboard's staged/live view |
+| `/meridian/hreflang.json` | Reciprocal hreflang cluster index (published to the edge for the runtime injector) |
+| `/meridian/promotions/{locale}/{ref}.json` | Pending promotion-approval requests |
+| `/meridian/taste-queue/…`, `/meridian/rejections/…` | Gated variant recomputes + rejection records |
+| `/{locale}/{ref}` *(live locale root)* | Promoted, production pages — the only content outside `/meridian`, always written through the collision guard |
+
+Source pages (the English originals) are read from the host site's own tree
+(`/{ref}`), never modified.
+
+## Architecture notes
+
+- **DA-native, no build step.** Browser ES modules + Lit (`da-lit`) + Adobe
+  Spectrum 2, loaded straight from `da.live` via an import map — exactly like the
+  DA team's own apps. `DA_SDK` supplies org/site/token; all DA I/O goes through the
+  signed-in user's session (`daFetch`), so there is no service credential.
+- **Pure engine, thin client.** `core/*` (except `store.js`) are pure functions
+  with no network imports, so the localization/propagation/scoring logic is fully
+  node-testable. `store.js` is the only DA-touching module and takes an injectable
+  `fetchImpl` so its methods are testable with a fake transport.
+- **Provider seam.** Client `createTranslator` → worker `/translate` → provider
+  registry (`translateDeepL` / `translateGoogleV2` / `translateMicrosoft` /
+  `translateLibre` / `translateFree`). Keys stay server-side; add a provider by
+  writing one `translate<X>` and adding it to the registry.
+- **Guardrails.** Path-traversal guards on every locale/ref (`SAFE_SEGMENT`);
+  source-locale write refusal; ownership marker + collision guard on live writes;
+  §11 — machine translates only the *language* layer, commercial/compliance stay
+  human-owned and quality-gated before publish.
+
+## Development
+
+```sh
+npm i
+npm test                 # node --test — unit/integration (pure engine + store DI)
+npm run lint             # eslint (Airbnb) + stylelint
+npm run smoke            # end-to-end lifecycle smoke (no browser)
+npm run license:check    # license headers
+```
+
+Worker (Cloudflare) — deployed separately from the app's DA code sync:
+
+```sh
+cd worker
+npx wrangler deploy
+npx wrangler secret put DEEPL_KEY          # optional: recommended MT provider
+npx wrangler secret put MS_TRANSLATOR_KEY  # optional: + MS_TRANSLATOR_REGION
+# GOOGLE_API_KEY / LIBRETRANSLATE_URL are also supported (see Translation provider)
+```
+
+Worker endpoints (all require the caller's DA `Authorization`; CORS allows the DA
+app origins — `*.aem.live/.page` and `*.(preview|live).da.live`):
+
+| Method · path | Purpose |
+| --- | --- |
+| `POST /translate` | `{ strings, from, to, org, site, provider?, formality?, glossaryId? }` → translations (provider chain; DeepL batched to its 50-text limit) |
+| `POST /glossary` | `{ source, target, entries }` → `{ glossaryId }` (builds a DeepL glossary) |
+| `GET /api/queue`, `POST /api/queue/approve|reject` | Variant taste-queue (gated publish) |
+
+UI correctness is verified in the browser inside DA (per project rule), not only by
+tests. Browser tests are run manually, never via the parallel runner.
