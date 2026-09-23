@@ -235,14 +235,17 @@ async function translateLibre(strings, from, to, env) {
   return strings.map((s, i) => (Array.isArray(out) ? out[i] : out) ?? s);
 }
 
-// DeepL host is inferred from the key suffix (:fx == free tier).
+// DeepL host is inferred from the key suffix (:fx == free tier). Trim first: a
+// secret stored with trailing whitespace would otherwise fail endsWith(':fx')
+// and route a FREE key to the PRO endpoint → 403 "Wrong endpoint".
 function deeplHost(key) {
-  return key.endsWith(':fx') ? 'https://api-free.deepl.com' : 'https://api.deepl.com';
+  return String(key).trim().endsWith(':fx') ? 'https://api-free.deepl.com' : 'https://api.deepl.com';
 }
 
 // One DeepL request for up to DEEPL_MAX texts.
 async function deeplBatch(batch, to, key, opts) {
   const { from, formality, glossaryId } = opts;
+  const authKey = String(key).trim();
   const params = new URLSearchParams();
   batch.forEach((s) => params.append('text', s));
   params.set('target_lang', to.split('-')[0].toUpperCase());
@@ -253,12 +256,16 @@ async function deeplBatch(batch, to, key, opts) {
   if (formality) params.set('formality', formality);
   // Forced terminology (brand/legal) via a pre-built DeepL glossary.
   if (glossaryId) params.set('glossary_id', glossaryId);
-  const r = await fetch(`${deeplHost(key)}/v2/translate`, {
+  const r = await fetch(`${deeplHost(authKey)}/v2/translate`, {
     method: 'POST',
-    headers: { Authorization: `DeepL-Auth-Key ${key}`, 'content-type': 'application/x-www-form-urlencoded' },
+    headers: { Authorization: `DeepL-Auth-Key ${authKey}`, 'content-type': 'application/x-www-form-urlencoded' },
     body: params,
   });
-  if (!r.ok) throw new Error(`DeepL failed (${r.status})`);
+  if (!r.ok) {
+    // Include DeepL's own explanation (target unsupported, quota, rate, etc.).
+    const why = await r.text().catch(() => '');
+    throw new Error(`DeepL failed (${r.status})${why ? `: ${why.replace(/\s+/g, ' ').slice(0, 200)}` : ''}`);
+  }
   const data = await r.json();
   return (data?.translations || []).map((t, i) => t?.text ?? batch[i]);
 }
@@ -407,9 +414,10 @@ async function handleGlossary(payload, request, env) {
     entries_format: 'tsv',
     entries: clean.map(([s, t]) => `${s}\t${t}`).join('\n'),
   });
-  const r = await fetch(`${deeplHost(env.DEEPL_KEY)}/v2/glossaries`, {
+  const authKey = String(env.DEEPL_KEY).trim();
+  const r = await fetch(`${deeplHost(authKey)}/v2/glossaries`, {
     method: 'POST',
-    headers: { Authorization: `DeepL-Auth-Key ${env.DEEPL_KEY}`, 'content-type': 'application/x-www-form-urlencoded' },
+    headers: { Authorization: `DeepL-Auth-Key ${authKey}`, 'content-type': 'application/x-www-form-urlencoded' },
     body: params,
   });
   if (!r.ok) return json({ error: `DeepL glossary create failed (${r.status})` }, 502, request);
