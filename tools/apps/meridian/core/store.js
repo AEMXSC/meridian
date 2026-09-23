@@ -214,14 +214,19 @@ export default class DaStore {
 
   #sourceLocale;
 
+  #fetch;
+
   constructor({
-    org, site, base = '/meridian', sourceLocale = 'en',
+    org, site, base = '/meridian', sourceLocale = 'en', fetchImpl = daFetch,
   }) {
     assertSiteRef(org, site);
     this.#org = org;
     this.#site = site;
     this.#base = base.replace(/\/$/, '');
     this.#sourceLocale = sourceLocale;
+    // Injectable so instance methods (guards, collision check, manifest) are
+    // unit-testable with a fake DA transport; defaults to the shared daFetch.
+    this.#fetch = fetchImpl;
   }
 
   get sourceLocale() {
@@ -257,7 +262,7 @@ export default class DaStore {
   // so a 401/500 is never silently reported as "not found" — matching MSM's
   // status-carrying error convention in core/operations.js.
   async #readJson(path) {
-    const resp = await daFetch(this.#sourceUrl(path), { cache: 'no-store' });
+    const resp = await this.#fetch(this.#sourceUrl(path), { cache: 'no-store' });
     if (resp.ok) return resp.json();
     if (resp.status === 404) return null;
     throw new Error(`Read failed for ${path} (${resp.status})`);
@@ -266,7 +271,7 @@ export default class DaStore {
   async #writeJson(path, value) {
     const body = new FormData();
     body.append('data', new Blob([serialize(value)], { type: 'application/json' }));
-    const resp = await daFetch(this.#sourceUrl(path), { method: 'PUT', body });
+    const resp = await this.#fetch(this.#sourceUrl(path), { method: 'PUT', body });
     if (!resp.ok) throw new Error(`Write failed for ${path} (${resp.status})`);
   }
 
@@ -416,7 +421,7 @@ export default class DaStore {
   }
 
   async deleteVariant(locale, canonicalId) {
-    const resp = await daFetch(this.#sourceUrl(this.#livePath(locale, canonicalId)), { method: 'DELETE' });
+    const resp = await this.#fetch(this.#sourceUrl(this.#livePath(locale, canonicalId)), { method: 'DELETE' });
     if (!resp.ok && resp.status !== 404) throw new Error(`Delete failed (${resp.status})`);
   }
 
@@ -437,7 +442,7 @@ export default class DaStore {
   async unpublishVariant(locale, canonicalId) {
     const path = `${this.#livePath(locale, canonicalId).replace(/\.json$/, '')}.json`;
     const del = async (kind) => {
-      const resp = await daFetch(`${AEM_ADMIN}/${kind}/${this.#org}/${this.#site}/main${path}`, { method: 'DELETE' });
+      const resp = await this.#fetch(`${AEM_ADMIN}/${kind}/${this.#org}/${this.#site}/main${path}`, { method: 'DELETE' });
       if (!resp.ok && resp.status !== 404) throw new Error(`Un${kind === 'live' ? 'publish' : 'preview'} failed for ${locale} (${resp.status})`);
     };
     await del('live');
@@ -449,7 +454,7 @@ export default class DaStore {
   // Distinguish a genuine 404 (null) from auth/server errors (throw), same as
   // #readJson, but for raw page HTML.
   async #readText(path) {
-    const resp = await daFetch(this.#sourceUrl(path), { cache: 'no-store' });
+    const resp = await this.#fetch(this.#sourceUrl(path), { cache: 'no-store' });
     if (resp.ok) return resp.text();
     if (resp.status === 404) return null;
     throw new Error(`Read failed for ${path} (${resp.status})`);
@@ -480,7 +485,7 @@ export default class DaStore {
     }
     const body = new FormData();
     body.append('data', new Blob([markManaged(html)], { type: 'text/html' }));
-    const resp = await daFetch(this.#sourceUrl(path), { method: 'PUT', body });
+    const resp = await this.#fetch(this.#sourceUrl(path), { method: 'PUT', body });
     if (!resp.ok) throw new Error(`Write failed for ${path} (${resp.status})`);
     return path;
   }
@@ -627,7 +632,7 @@ export default class DaStore {
   async listQueue() {
     const items = [];
     const walk = async (path) => {
-      const resp = await daFetch(`${DA_ORIGIN}/list/${this.#org}/${this.#site}${path}`, { cache: 'no-store' });
+      const resp = await this.#fetch(`${DA_ORIGIN}/list/${this.#org}/${this.#site}${path}`, { cache: 'no-store' });
       if (resp.status === 404) return;
       if (!resp.ok) throw new Error(`Queue list failed for ${path} (${resp.status})`);
       const entries = await resp.json();
@@ -663,7 +668,7 @@ export default class DaStore {
       throw new Error(`Unsafe path: ${JSON.stringify(path)}`);
     }
     const rel = segs.length ? `/${segs.join('/')}` : '';
-    const resp = await daFetch(`${DA_ORIGIN}/list/${this.#org}/${this.#site}${rel}`, { cache: 'no-store' });
+    const resp = await this.#fetch(`${DA_ORIGIN}/list/${this.#org}/${this.#site}${rel}`, { cache: 'no-store' });
     if (resp.status === 404) return [];
     if (!resp.ok) throw new Error(`Read failed (${resp.status})`);
     const items = await resp.json();
@@ -688,7 +693,7 @@ export default class DaStore {
   }
 
   async removeQueueItem(locale, canonicalId) {
-    const resp = await daFetch(
+    const resp = await this.#fetch(
       this.#sourceUrl(queuePath(this.#base, locale, canonicalId)),
       { method: 'DELETE' },
     );
