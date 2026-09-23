@@ -1311,15 +1311,6 @@ class MeridianApp extends LitElement {
     this._pageRisk = [];
   }
 
-  // Switch publish target. Paths differ between modes, so any per-page status
-  // and the coverage matrix are invalidated (they reload on next view).
-  setMode(mode) {
-    if (mode === this._publishMode) return;
-    this._publishMode = mode;
-    this._pageRisk = [];
-    this._matrix = null;
-  }
-
   renderChip(code, name) {
     const on = this._localeSel.has(code);
     return html`
@@ -2120,19 +2111,11 @@ class MeridianApp extends LitElement {
         commercial &amp; compliance segments before publishing — the difference between a
         <em>translated</em> page and a <em>localized</em> one.
       </p>
-      <div class="mrd-publish-mode" role="group" aria-label="Publish target">
-        <span class="mrd-lang-group-label">Publish to</span>
-        <button class="mrd-mode-opt ${this._publishMode === 'sandbox' ? 'on' : ''}"
-          aria-pressed=${this._publishMode === 'sandbox'} ?disabled=${this._pageBusy}
-          @click=${() => this.setMode('sandbox')}>Sandbox <code>/meridian/live/…</code></button>
-        <button class="mrd-mode-opt ${this._publishMode === 'locale-root' ? 'on' : ''}"
-          aria-pressed=${this._publishMode === 'locale-root'} ?disabled=${this._pageBusy}
-          @click=${() => this.setMode('locale-root')}>Live <code>/{locale}/…</code></button>
-      </div>
       ${this._publishMode === 'locale-root' ? html`
         <div class="mrd-entry-meta mrd-mode-note">
-          Publishing to real locale URLs (e.g. <code>/fr/${this._pageRef || 'page'}</code>). Existing
-          non-Meridian pages are protected — Meridian won't overwrite a page it didn't create.
+          <strong>Direct publish is on</strong> (configured): pages go straight to real locale URLs
+          (e.g. <code>/fr/${this._pageRef || 'page'}</code>), skipping the sandbox review step. Existing
+          non-Meridian pages are still protected.
         </div>` : nothing}
       <div class="mrd-page-form">
         <label id="mrd-page-lbl">Page</label>

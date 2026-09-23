@@ -121,20 +121,31 @@ Phrase, a private model) and wire it into `handleTranslate`. Only the **language
 layer is machine-translated; commercial/compliance stay human-owned (PRD §11), and
 every machine result is quality-gated before publish.
 
-## Publish mode & SEO (sandbox vs production)
+## Staging → review → promote (how pages reach live)
 
-Localized pages can publish two ways (toggle in the **Localize** tab, or default it
-per site with `publishMode` in `/meridian/config.json`):
+The default flow has one path to production, so review is never skipped:
 
-- **`sandbox`** (default) — pages go to `/meridian/live/{locale}/{ref}`. Namespaced,
-  collision-free, ideal for demos and trials.
-- **`locale-root`** (production) — pages go to a clean, SEO-correct URL:
-  `/{locale}/{ref}` (e.g. `/fr/international-banking`). The canonical object and
-  adaptation layers still stay internal under `/meridian`; only the *rendered page*
-  moves. Publish target for each market is derived from DA's `translate-v2.json`
-  `location` convention.
+1. **Stage** — Translate/Localize always writes to the **sandbox** working area
+   (`/meridian/live/{locale}/{ref}`): namespaced, collision-free, safe to iterate.
+2. **Review** — side-by-side preview, the overlay segment editor, the coverage dashboard.
+3. **Promote to live** — copy the *reviewed* page byte-for-byte to its clean,
+   SEO-correct locale URL `/{locale}/{ref}` (e.g. `/fr/international-banking`).
+   Two routes, both on the page's result row:
+   - **Promote to live** — self-review, one click.
+   - **Request approval** — a *different* reviewer approves in the **Approvals** tab
+     (`store.promotePage` runs under the approver's own DA session). The governed,
+     "nothing goes live without a named human" path.
 
-Guardrails that ship with production mode:
+The canonical object + adaptation layers always stay internal under `/meridian`;
+only the *rendered page* is promoted. The live locale path is derived from DA's
+`translate-v2.json` `location` convention.
+
+**Advanced opt-out (no UI):** set `publishMode: 'locale-root'` in
+`/meridian/config.json` and Translate/Localize publish **straight** to the live
+locale URL, skipping the sandbox review step — for trusted-MT / automated pipelines
+only. Omit it (default `sandbox`) for the staged flow above.
+
+Guardrails on every write to a live locale path:
 
 - **Collision guard.** Every Meridian page carries an ownership marker; in
   locale-root mode Meridian refuses to overwrite a target that exists and isn't
