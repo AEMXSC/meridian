@@ -1984,9 +1984,9 @@ class MeridianApp extends LitElement {
     }
     const pct = Math.round((r.coverage?.ratio ?? 0) * 100);
     const mem = r.memory ? ` · ${r.memory}% from memory` : '';
-    const badge = r.kind === 'localize'
-      ? `localized · language ${pct}% · market ${r.heldDone}/${r.heldTotal}${mem}`
-      : `translated · language ${pct}%${mem}`;
+    let badge = `translated · language ${pct}%${mem}`;
+    if (r.kind === 'staged') badge = 'staged — review, then promote';
+    else if (r.kind === 'localize') badge = `localized · language ${pct}% · market ${r.heldDone}/${r.heldTotal}${mem}`;
     const previewing = this._previewOpen.has(locale);
     return html`
       <div class="mrd-market">
@@ -2311,6 +2311,25 @@ class MeridianApp extends LitElement {
     return `https://main--${site}--${this._org}.aem.live${rel}`;
   }
 
+  // Launch into Pages to REVIEW a staged page and then promote it — seed a
+  // promotable result row (from the manifest, no re-translation) so the author
+  // lands on the page with Preview + Promote + Request approval ready.
+  reviewStaged(ref, locale) {
+    this._pageRef = ref;
+    this._localeSel = new Set([locale]);
+    this._pageError = '';
+    this._pageResults = new Map([[locale, {
+      ok: true,
+      kind: 'staged',
+      ref,
+      mode: 'sandbox',
+      sourceUrl: this.pageEdgeUrl(ref),
+      liveUrl: this.localizedEdgeUrl(ref, locale, 'staged'),
+      path: `/meridian/live/${locale}/${ref}`,
+    }]]);
+    this._tab = 'pages';
+  }
+
   renderOverview() {
     if (this._matrix === null) {
       if (!this._matrixBusy) this.loadMatrix();
@@ -2357,24 +2376,29 @@ class MeridianApp extends LitElement {
                 </th>
                 ${row.cells.map((c) => {
     const d = cellDisplay(c);
-    // A localized cell deep-links to the real page (live URL if promoted, sandbox
-    // preview URL if staged). An empty cell jumps into Localize to create it.
-    if (c.stage === 'none') {
+    // Empty cell → jump into Localize to create it. Staged cell → launch into
+    // Pages (review side-by-side, then Promote) — never a blind grid-promote.
+    if (c.stage !== 'live') {
+      const act = c.stage === 'staged'
+        ? () => this.reviewStaged(row.ref, c.locale)
+        : () => this.localizeFromMatrix(row.ref, c.locale);
+      const tip = c.stage === 'staged'
+        ? `Review & promote ${c.locale} · ${d.tip}`
+        : `Localize ${row.ref} → ${c.locale}`;
       return html`
                   <td>
-                    <button class="mrd-matrix-cell"
-                      @click=${() => this.localizeFromMatrix(row.ref, c.locale)}
-                      title=${`Localize ${row.ref} → ${c.locale}`}>
+                    <button class="mrd-matrix-cell" @click=${act} title=${tip}>
                       <span class="mrd-risk-chip mrd-risk-${d.cls}">${d.label}</span>
                     </button>
                   </td>`;
     }
+    // Live cell → deep-link to the real live page (a quick peek).
     return html`
                   <td>
                     <a class="mrd-matrix-cell"
-                      href=${this.localizedEdgeUrl(row.ref, c.locale, c.stage)}
+                      href=${this.localizedEdgeUrl(row.ref, c.locale, 'live')}
                       target="_blank" rel="noopener"
-                      title=${`Open ${c.stage === 'live' ? 'live' : 'sandbox preview'} — ${c.locale} · ${d.tip}`}>
+                      title=${`Open live ${c.locale} page · ${d.tip}`}>
                       <span class="mrd-risk-chip mrd-risk-${d.cls}">${d.label}</span>
                     </a>
                   </td>`;
