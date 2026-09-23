@@ -311,6 +311,15 @@
 .mrd-locale {
   font-weight: 700;
   font-size: 15px;
+  text-transform: uppercase;
+}
+
+/* Result-row action cluster (View live · Copy link · Edit in DA) */
+.mrd-market-actions {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 16px;
 }
 
 .mrd-diff-btn {
@@ -733,6 +742,11 @@
   text-decoration: underline;
 }
 
+/* Inside the action cluster the group owns right-alignment, not each link. */
+.mrd-market-actions .mrd-page-link {
+  margin-left: 0;
+}
+
 .mrd-page-link-btn {
   font: inherit;
   font-weight: 700;
@@ -830,7 +844,7 @@
   display: flex;
   flex-direction: column;
   align-items: flex-start;
-  gap: 6px;
+  gap: 8px;
 }
 
 /* One row per group (base languages, then each region group) */
@@ -838,16 +852,17 @@
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: 4px;
+  gap: 6px;
 }
 
 .mrd-lang-group-label {
+  min-width: 64px;
   font-size: 11px;
   font-weight: 700;
   text-transform: uppercase;
   letter-spacing: 0.04em;
   color: var(--mrd-text-muted);
-  margin-right: 4px;
+  margin-right: 6px;
 }
 
 .mrd-lang-all {
@@ -1025,6 +1040,20 @@
 
 .mrd-matrix-link:hover {
   text-decoration: underline;
+}
+
+/* A coverage cell is a shortcut into Localize for that page + market */
+.mrd-matrix-cell {
+  font: inherit;
+  padding: 2px;
+  border: 1px solid transparent;
+  border-radius: var(--mrd-radius-control);
+  background: none;
+  cursor: pointer;
+}
+
+.mrd-matrix-cell:hover {
+  border-color: var(--mrd-accent);
 }
 
 /* Page tree */

@@ -1825,12 +1825,14 @@ class MeridianApp extends LitElement {
           <button class="mrd-preview-toggle" @click=${() => this.togglePreview(locale)}>
             ${previewing ? 'Hide preview' : 'Preview'}
           </button>
-          <a class="mrd-page-link" href=${r.liveUrl} target="_blank" rel="noopener">View live page ↗</a>
-          <button class="mrd-page-link-btn" ?disabled=${this._pageBusy}
-            @click=${() => this.copyLink(r.liveUrl)}>Copy link</button>
-          ${r.path ? html`
-            <a class="mrd-page-link" href=${this.daEditUrl(r.path)}
-              target="_blank" rel="noopener">Edit in DA ↗</a>` : nothing}
+          <span class="mrd-market-actions">
+            <a class="mrd-page-link" href=${r.liveUrl} target="_blank" rel="noopener">View live page ↗</a>
+            <button class="mrd-page-link-btn" ?disabled=${this._pageBusy}
+              @click=${() => this.copyLink(r.liveUrl)}><span aria-hidden="true">⧉</span> Copy link</button>
+            ${r.path ? html`
+              <a class="mrd-page-link" href=${this.daEditUrl(r.path)}
+                target="_blank" rel="noopener">Edit in DA ↗</a>` : nothing}
+          </span>
         </div>
         ${r.kind === 'translate' && r.review?.length ? html`
           <div class="mrd-entry-meta">
@@ -2120,6 +2122,15 @@ class MeridianApp extends LitElement {
     }
   }
 
+  // Jump from a coverage cell straight into Localize, pre-scoped to that page +
+  // market (act-from-dashboard, like the DA loc app's status list).
+  localizeFromMatrix(ref, locale) {
+    this._pageRef = ref;
+    this._localeSel = new Set([locale]);
+    this._pageRisk = [];
+    this._tab = 'pages';
+  }
+
   renderOverview() {
     if (this._matrix === null) {
       if (!this._matrixBusy) this.loadMatrix();
@@ -2164,9 +2175,13 @@ class MeridianApp extends LitElement {
                     title="Open in Pages">${row.ref}</button>
                 </th>
                 ${row.cells.map((c) => html`
-                  <td><span class="mrd-risk-chip mrd-risk-${c.state}"
-                    title=${c.at ? `${RISK_TIP[c.state]} (localized ${formatWhen(c.at)})` : RISK_TIP[c.state]}
-                  >${RISK_LABEL[c.state]}</span></td>`)}
+                  <td>
+                    <button class="mrd-matrix-cell"
+                      @click=${() => this.localizeFromMatrix(row.ref, c.locale)}
+                      title=${`Localize ${row.ref} → ${c.locale} · ${c.at ? `${RISK_TIP[c.state]} (localized ${formatWhen(c.at)})` : RISK_TIP[c.state]}`}>
+                      <span class="mrd-risk-chip mrd-risk-${c.state}">${RISK_LABEL[c.state]}</span>
+                    </button>
+                  </td>`)}
               </tr>`)}
           </tbody>
         </table>
