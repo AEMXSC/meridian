@@ -90,6 +90,21 @@ function formatWhen(value) {
   return new Date(ms).toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' });
 }
 
+// Render one coverage cell along both axes — stage (live/staged/none) and
+// freshness (stale) — into a label + chip class + tooltip.
+function cellDisplay(c) {
+  const when = c.at ? ` (${formatWhen(c.at)})` : '';
+  if (c.stage === 'none') return { label: '—', cls: 'missing', tip: 'Not localized' };
+  if (c.stage === 'staged') {
+    return c.fresh === 'stale'
+      ? { label: 'Staged ⚠', cls: 'stale', tip: `Staged in sandbox; source changed since${when} — re-localize before promoting` }
+      : { label: 'Staged', cls: 'staged', tip: `Reviewed in sandbox — awaiting promotion${when}` };
+  }
+  return c.fresh === 'stale'
+    ? { label: 'Update due', cls: 'stale', tip: `Live, but source changed since${when} — re-localize + promote` }
+    : { label: 'Live', cls: 'current', tip: `Promoted & live${when}` };
+}
+
 function parseDeepLink() {
   const params = new URLSearchParams(window.location.search);
   const tab = (params.get('tab') || '').trim();
@@ -300,39 +315,41 @@ class MeridianApp extends LitElement {
     this._bulkResults = [];
     try {
       this._store = new DaStore({ org: this._org, site: this._site });
+      // config.json is OPTIONAL. Meridian works on any org/site the user can
+      // access; /meridian/config.json only adds the canonical/adaptation (variant)
+      // model + exposure. Without it, Pages (translate/localize/promote) and the
+      // Dashboard still work — so a brand-new site is usable immediately. A genuine
+      // auth/read error (not a 404) throws and is surfaced below. (readConfig
+      // returns null on 404.)
       const config = await this._store.readConfig();
-      if (!config) {
-        this._error = `No /meridian/config.json found in ${this._org}/${this._site}.`;
-        this._state = 'init';
-        return;
-      }
-      if (!config.canonicalId || !Array.isArray(config.policies)) {
-        this._error = `Malformed /meridian/config.json in ${this._org}/${this._site} (needs canonicalId + policies[]).`;
-        this._state = 'init';
-        return;
-      }
-      this._config = config;
-      this._canonicalId = config.canonicalId;
-      this._policies = config.policies;
+      const valid = !!(config && config.canonicalId && Array.isArray(config.policies));
+      this._config = config || {};
+      this._canonicalId = valid ? config.canonicalId : null;
+      this._policies = valid ? config.policies : [];
       // The site's source language (its own pages). Rebuild the store with it so
-      // the store can refuse to localize INTO the source (that's the source page,
-      // not a market) and so hreflang labels the source/x-default correctly.
-      this._sourceLocale = (typeof config.sourceLocale === 'string' && config.sourceLocale)
+      // the store can refuse to localize INTO the source and hreflang labels the
+      // source/x-default correctly.
+      this._sourceLocale = (config && typeof config.sourceLocale === 'string' && config.sourceLocale)
         ? config.sourceLocale : 'en';
       this._store = new DaStore({
         org: this._org, site: this._site, sourceLocale: this._sourceLocale,
       });
-      // Publish mode defaults from config (a site can ship in production mode);
-      // otherwise sandbox. The author can still toggle it per session.
-      this._publishMode = config.publishMode === 'locale-root' ? 'locale-root' : 'sandbox';
-      this._findings = await scanCanonical(this._store, config.canonicalId, config.policies);
+      this._publishMode = (config && config.publishMode === 'locale-root') ? 'locale-root' : 'sandbox';
+      // Exposure findings only exist once markets are configured.
+      this._findings = valid
+        ? await scanCanonical(this._store, this._canonicalId, this._policies).catch(() => [])
+        : [];
       this._state = 'ready';
       this.saveRecent(this._org, this._site);
       this.loadQueue();
-      this.loadAdaptations();
+      if (this._canonicalId) this.loadAdaptations();
       this.loadTranslate();
       this.loadCatalog();
-      this.loadEdgeStatus();
+      if (this._policies.length) this.loadEdgeStatus();
+      // Present-but-malformed config: note it, but don't block the Pages flow.
+      if (config && !valid) {
+        this._error = 'Note: /meridian/config.json is malformed (needs canonicalId + policies[]). Pages still works; fix it to enable exposure & adaptations.';
+      }
     } catch (e) {
       console.error(e);
       this._error = e.message || 'Scan failed.';
@@ -2207,10 +2224,9 @@ class MeridianApp extends LitElement {
       if (this._catalog === null) await this.loadCatalog();
       // Configured markets, minus the source language (its own pages aren't a market).
       const configured = (this._catalog?.all ?? []).filter((c) => c !== this._sourceLocale);
-      const mode = this._publishMode;
       // Markets can live in different repos, so compute a coverage sub-matrix per
-      // target site and merge by page. Scan the base site plus any site the
-      // config routes a configured market to.
+      // target site (from each site's managed manifest) and merge by page. Scan the
+      // base site plus any site the config routes a configured market to.
       const sites = new Set([this._site, ...configured.map((c) => this.siteForLocale(c))]);
       const rowsByRef = new Map(); // ref -> Map(locale -> cell)
       const localeSet = new Set(configured);
@@ -2218,24 +2234,14 @@ class MeridianApp extends LitElement {
         const store = this.storeForSite(site);
         const here = (code) => this.siteForLocale(code) === site && code !== this._sourceLocale;
         const siteLocales = new Set(configured.filter(here));
-        let siteRefs;
-        if (mode === 'locale-root') {
-          const rooted = (await store.readManaged()).filter((e) => e.mode === 'locale-root' && here(e.locale));
-          rooted.forEach((e) => siteLocales.add(e.locale));
-          siteRefs = [...new Set(rooted.map((e) => e.ref))];
-        } else {
-          (await store.listLocales()).filter(here).forEach((l) => siteLocales.add(l));
-        }
+        const managed = await store.readManaged();
+        managed.forEach((e) => {
+          if (here(e.locale)) siteLocales.add(e.locale);
+        });
         const locs = [...siteLocales];
         if (!locs.length) return;
         locs.forEach((l) => localeSet.add(l));
-        let sub = [];
-        if (mode === 'locale-root') {
-          if (siteRefs.length) sub = await store.localizedMatrix(locs, { refs: siteRefs, mode });
-        } else {
-          sub = await store.localizedMatrix(locs, { mode });
-        }
-        sub.forEach((row) => {
+        (await store.promotionMatrix(locs, managed)).forEach((row) => {
           if (!rowsByRef.has(row.ref)) rowsByRef.set(row.ref, new Map());
           const rc = rowsByRef.get(row.ref);
           row.cells.forEach((c) => rc.set(c.locale, c));
@@ -2246,7 +2252,9 @@ class MeridianApp extends LitElement {
       this._matrixLocales = locales;
       this._matrix = refs.map((ref) => ({
         ref,
-        cells: locales.map((loc) => rowsByRef.get(ref).get(loc) || { locale: loc, state: 'missing', at: null }),
+        cells: locales.map((loc) => rowsByRef.get(ref).get(loc) || {
+          locale: loc, stage: 'none', fresh: 'missing', at: null,
+        }),
       }));
     } catch (e) {
       this._error = e.message;
@@ -2277,7 +2285,8 @@ class MeridianApp extends LitElement {
       </div>`;
     }
     const cells = this._matrix.flatMap((r) => r.cells);
-    const count = (s) => cells.filter((c) => c.state === s).length;
+    const staged = cells.filter((c) => c.stage === 'staged').length;
+    const live = cells.filter((c) => c.stage === 'live').length;
     return html`
       <div class="mrd-summary">
         <div class="mrd-scorecard mrd-positive">
@@ -2287,10 +2296,10 @@ class MeridianApp extends LitElement {
           <div class="mrd-score">${locales.length}</div><div class="mrd-score-label">Markets</div>
         </div>
         <div class="mrd-scorecard mrd-warning">
-          <div class="mrd-score">${count('stale')}</div><div class="mrd-score-label">Update due</div>
+          <div class="mrd-score">${staged}</div><div class="mrd-score-label">Staged · awaiting promotion</div>
         </div>
-        <div class="mrd-scorecard">
-          <div class="mrd-score">${count('missing')}</div><div class="mrd-score-label">Not localized</div>
+        <div class="mrd-scorecard mrd-positive">
+          <div class="mrd-score">${live}</div><div class="mrd-score-label">Live</div>
         </div>
         <sl-button class="primary outline mrd-matrix-refresh" ?disabled=${this._matrixBusy}
           @click=${() => this.loadMatrix()}>Refresh</sl-button>
@@ -2308,14 +2317,17 @@ class MeridianApp extends LitElement {
                     @click=${() => { this._pageRef = row.ref; this._pageRisk = []; this._tab = 'pages'; }}
                     title="Open in Pages">${row.ref}</button>
                 </th>
-                ${row.cells.map((c) => html`
+                ${row.cells.map((c) => {
+    const d = cellDisplay(c);
+    return html`
                   <td>
                     <button class="mrd-matrix-cell"
                       @click=${() => this.localizeFromMatrix(row.ref, c.locale)}
-                      title=${`Localize ${row.ref} → ${c.locale} · ${c.at ? `${RISK_TIP[c.state]} (localized ${formatWhen(c.at)})` : RISK_TIP[c.state]}`}>
-                      <span class="mrd-risk-chip mrd-risk-${c.state}">${RISK_LABEL[c.state]}</span>
+                      title=${`${row.ref} → ${c.locale} · ${d.tip}`}>
+                      <span class="mrd-risk-chip mrd-risk-${d.cls}">${d.label}</span>
                     </button>
-                  </td>`)}
+                  </td>`;
+  })}
               </tr>`)}
           </tbody>
         </table>

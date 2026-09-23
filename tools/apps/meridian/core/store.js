@@ -591,30 +591,6 @@ export default class DaStore {
 
   // ---- Localization dashboard (coverage matrix over real pages) -------------
 
-  // The locales that have any localized content (folders under {base}/live).
-  async listLocales() {
-    const nodes = await this.listPages(`${this.#base}/live`).catch(() => []);
-    return nodes.filter((n) => n.isFolder).map((n) => n.name);
-  }
-
-  // Every localized page ref under one locale (recursive), site-relative and
-  // without the {base}/live/{locale} prefix or .html.
-  async #localizedRefs(locale) {
-    const base = `${this.#base}/live/${locale}`;
-    const out = [];
-    const walk = async (path) => {
-      const nodes = await this.listPages(path).catch(() => []);
-      const folders = [];
-      nodes.forEach((n) => {
-        if (n.isFolder) folders.push(n.path);
-        else out.push(n.path.slice(base.length + 1).replace(/\.html$/, ''));
-      });
-      await runWithConcurrency(folders.map((f) => () => walk(f)), 4);
-    };
-    await walk(base);
-    return out;
-  }
-
   // Every real .html page on the site (recursive, site-relative refs, no .html),
   // for the page-search box. Skips the Meridian base (our own artifacts) and
   // dot-folders. Small sites only — fine to walk on demand.
@@ -636,28 +612,29 @@ export default class DaStore {
     return [...new Set(out)].sort();
   }
 
-  // The coverage matrix: every localized page (rows) × the given locales
-  // (columns), each cell current / stale / missing. The portfolio "radar".
-  // `opts.refs` supplies the page list explicitly (from the managed manifest in
-  // locale-root mode, where folder-walking /meridian/live no longer finds them);
-  // absent, it discovers them from the sandbox tree. `opts.mode` selects the cell
-  // path (sandbox vs locale-root).
-  async localizedMatrix(locales, opts = {}) {
-    const mode = opts.mode || 'sandbox';
-    let { refs } = opts;
-    if (!refs) {
-      const refSet = new Set();
-      await runWithConcurrency(locales.map((loc) => async () => {
-        assertLocale(loc);
-        (await this.#localizedRefs(loc)).forEach((r) => refSet.add(r));
-      }), 4);
-      refs = [...refSet];
-    }
-    refs = [...new Set(refs)].sort();
-    // Bound the N pages × M locales timestamp lookups so a big site can't fire
-    // hundreds of DA requests at once (reuses MSM's concurrency limiter).
+  // The coverage matrix, driven by the managed manifest (the record of every page
+  // Meridian materialized, with its mode). Each cell reports two axes:
+  //   stage: 'live' (promoted to the locale root) | 'staged' (in sandbox, awaiting
+  //          promotion) | 'none' (not localized)
+  //   fresh: 'current' | 'stale' (source changed after it) | 'missing'
+  // Only pages this store's manifest knows about are considered (single site);
+  // the app aggregates across target sites. Timestamp lookups are bounded.
+  async promotionMatrix(locales, entries) {
+    const rows = entries || await this.readManaged();
+    const wanted = new Set(locales);
+    const modeByCell = new Map(); // `${ref}|${loc}` -> mode
+    const refSet = new Set();
+    // Scope to the requested locales so a stale manifest entry (e.g. a market
+    // since re-routed to another site or removed from the config) can't emit an
+    // all-"none" ghost row for a page that is really localized elsewhere.
+    rows.forEach((e) => {
+      if (!e || !e.ref || !e.locale || !wanted.has(e.locale)) return;
+      modeByCell.set(`${e.ref}|${e.locale}`, e.mode || 'sandbox');
+      refSet.add(e.ref);
+    });
+    const refs = [...refSet].sort();
     const srcMs = new Map();
-    const cellMs = new Map(); // `${ref}|${loc}` -> lastModified
+    const cellMs = new Map();
     const tasks = [];
     refs.forEach((ref) => {
       const clean = assertPageRef(ref);
@@ -665,21 +642,30 @@ export default class DaStore {
         const src = await getPageTimestamp(this.#org, this.#site, `/${clean}`, 'html').catch(() => ({}));
         srcMs.set(ref, src?.lastModified ?? null);
       });
-      locales.forEach((loc) => tasks.push(async () => {
-        const path = localePagePath(this.#base, loc, clean, mode).replace(/\.html$/, '');
-        const ts = await getPageTimestamp(this.#org, this.#site, path, 'html').catch(() => ({}));
-        cellMs.set(`${ref}|${loc}`, ts?.lastModified ?? null);
-      }));
+      locales.forEach((loc) => {
+        const mode = modeByCell.get(`${ref}|${loc}`);
+        if (!mode) return;
+        tasks.push(async () => {
+          const path = localePagePath(this.#base, loc, clean, mode).replace(/\.html$/, '');
+          const ts = await getPageTimestamp(this.#org, this.#site, path, 'html').catch(() => ({}));
+          cellMs.set(`${ref}|${loc}`, ts?.lastModified ?? null);
+        });
+      });
     });
     await runWithConcurrency(tasks, 6);
     return refs.map((ref) => ({
       ref: assertPageRef(ref),
       cells: locales.map((loc) => {
-        const at = cellMs.get(`${ref}|${loc}`);
+        const mode = modeByCell.get(`${ref}|${loc}`);
+        const at = cellMs.get(`${ref}|${loc}`) ?? null;
+        let stage = 'none';
+        if (mode === 'locale-root') stage = 'live';
+        else if (mode) stage = 'staged';
         return {
           locale: loc,
-          state: pageRiskState(srcMs.get(ref), at),
-          at: at ?? null,
+          stage,
+          fresh: mode ? pageRiskState(srcMs.get(ref), at) : 'missing',
+          at,
         };
       }),
     }));
