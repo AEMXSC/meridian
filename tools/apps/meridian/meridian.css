@@ -766,19 +766,6 @@
   text-decoration: underline;
 }
 
-/* Promote is the primary action on a reviewed sandbox row — give it a pill so it
-   stands out from the plain link actions. */
-.mrd-promote {
-  padding: 3px 10px;
-  border: 1px solid var(--mrd-accent);
-  border-radius: var(--mrd-radius-pill);
-}
-
-.mrd-promote:hover:not(:disabled) {
-  background: var(--mrd-accent);
-  color: #fff;
-  text-decoration: none;
-}
 
 .mrd-page-link-inline {
   color: var(--mrd-accent);

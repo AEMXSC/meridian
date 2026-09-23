@@ -1963,11 +1963,11 @@ class MeridianApp extends LitElement {
               <a class="mrd-page-link" href=${this.daEditUrl(r.path)}
                 target="_blank" rel="noopener">Edit in DA ↗</a>` : nothing}
             ${r.mode === 'sandbox' && r.ref && !r.promoted ? html`
-              <button class="mrd-page-link-btn mrd-promote" ?disabled=${this._pageBusy}
-                title="Copy this reviewed page to the live /${locale}/ URL"
-                @click=${() => this.promoteToLive(locale, r.ref)}>Promote to live ↑</button>
-              <button class="mrd-page-link-btn" ?disabled=${this._pageBusy || r.requested}
-                @click=${() => this.requestPromotion(locale, r.ref)}>${r.requested ? 'Approval requested' : 'Request approval'}</button>
+              <sl-button ?disabled=${this._pageBusy}
+                title="Publish this reviewed page to the live /${locale}/ URL"
+                @click=${() => this.promoteToLive(locale, r.ref)}>Promote to live ↑</sl-button>
+              <sl-button class="primary outline" ?disabled=${this._pageBusy || r.requested}
+                @click=${() => this.requestPromotion(locale, r.ref)}>${r.requested ? 'Approval requested ✓' : 'Request approval'}</sl-button>
             ` : nothing}
             ${r.promoted ? html`<span class="mrd-kind mrd-positive">promoted → live</span>` : nothing}
           </span>
