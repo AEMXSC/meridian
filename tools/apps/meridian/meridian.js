@@ -313,6 +313,20 @@ class MeridianApp extends LitElement {
     this._allPages = null;
     this._pageRisk = [];
     this._bulkResults = [];
+    // Page-scoped state is per-site too — reset it so a scan never carries the
+    // previous site's selected page, page tree, or results forward (e.g. the
+    // citizens default "international-banking" leaking onto another org's site).
+    this._pageRef = '';
+    this._pageTree = new Map();
+    this._pageExpanded = new Set();
+    this._browseOpen = false;
+    this._treeQuery = '';
+    this._pageResults = new Map();
+    this._previewOpen = new Set();
+    this._localizeDrafts = new Map();
+    this._localizeStore = null;
+    this._localizeOrg = '';
+    this._localizeSite = '';
     try {
       this._store = new DaStore({ org: this._org, site: this._site });
       // config.json is OPTIONAL. Meridian works on any org/site the user can
