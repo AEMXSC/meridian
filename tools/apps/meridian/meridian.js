@@ -112,6 +112,10 @@ function parseDeepLink() {
     org: (params.get('org') || '').trim(),
     site: (params.get('site') || '').trim(),
     tab: TABS.includes(tab) ? tab : 'overview',
+    // Arriving from the editor plugin's reference panel: prefill a page + market
+    // so the author lands on Pages already scoped, never re-entering context.
+    page: (params.get('page') || '').trim().replace(/^\/+/, '').replace(/\.html$/, ''),
+    market: (params.get('market') || '').trim(),
   };
 }
 
@@ -195,7 +199,12 @@ class MeridianApp extends LitElement {
     this._diffs = new Map();
     this._loadingDiffs = new Set();
     this._error = '';
-    this._tab = parseDeepLink().tab;
+    const deepLink = parseDeepLink();
+    this._tab = deepLink.tab;
+    // Consumed once, on the first scan, then cleared so later manual scans /
+    // site switches reset cleanly instead of snapping back to the plugin's page.
+    this._deepPage = deepLink.page;
+    this._deepMarket = deepLink.market;
     this._queue = [];
     this._promotions = [];
     // Promotion requests we just wrote but DA's /list index may not reflect yet
@@ -325,6 +334,12 @@ class MeridianApp extends LitElement {
     this._pageRisk = [];
     this._bulkResults = [];
     this._pendingPromoKeys = new Set();
+    // Consume the editor-plugin deep link exactly once: capture + clear it now, so
+    // a failed first scan or a later site switch can never re-apply a stale page.
+    const deepPage = this._deepPage;
+    const deepMarket = this._deepMarket;
+    this._deepPage = '';
+    this._deepMarket = '';
     // Page-scoped state is per-site too — reset it so a scan never carries the
     // previous site's selected page, page tree, or results forward (e.g. the
     // citizens default "international-banking" leaking onto another org's site).
@@ -368,6 +383,13 @@ class MeridianApp extends LitElement {
         ? await scanCanonical(this._store, this._canonicalId, this._policies).catch(() => [])
         : [];
       this._state = 'ready';
+      // Prefill page/market from an editor-plugin deep link (captured at the top of
+      // this scan), so the author lands on Pages already scoped to their page.
+      if (deepPage) {
+        this._pageRef = deepPage;
+        this._tab = 'pages';
+      }
+      if (deepMarket) this._localeSel = new Set([deepMarket]);
       this.saveRecent(this._org, this._site);
       this.loadQueue();
       if (this._canonicalId) this.loadAdaptations();

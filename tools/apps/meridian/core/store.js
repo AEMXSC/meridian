@@ -30,6 +30,7 @@ import { parseLocaleConfig } from './locale-config.js';
 import {
   markManaged, overwriteBlocked, publishRelPath, buildHreflangIndex,
 } from './managed.js';
+import { buildPageReference } from './page-reference.js';
 import runWithConcurrency from './concurrency.js';
 
 // A single path segment: letters, digits, underscore, hyphen. No dots (blocks
@@ -346,6 +347,33 @@ export default class DaStore {
       const ts = await getPageTimestamp(this.#org, this.#site, path, 'html').catch(() => ({}));
       return { locale, state: pageRiskState(sourceMs, ts?.lastModified ?? null) };
     }));
+  }
+
+  // "Where does this page live in every market?" for the editor plugin's
+  // reference panel: every configured market's relationship to one source page
+  // (live / staged / not localized), decorated with a stale flag when the source
+  // has moved since. Config-optional — with no translate-v2.json the catalog is
+  // empty and only markets Meridian already has a copy for are listed. Freshness
+  // is checked only for markets we manage (grouped by their publish mode), so an
+  // all-missing page costs no timestamp calls.
+  async pageReferenceStatus(ref) {
+    const clean = assertPageRef(ref);
+    const [catalog, allManaged] = await Promise.all([this.localeCatalog(), this.readManaged()]);
+    const locales = (catalog.all ?? []).filter((l) => l !== this.#sourceLocale);
+    const managed = allManaged.filter((e) => e && e.ref === clean);
+    const risk = {};
+    const byMode = new Map();
+    managed.forEach((e) => {
+      if (!byMode.has(e.mode)) byMode.set(e.mode, []);
+      byMode.get(e.mode).push(e.locale);
+    });
+    await Promise.all([...byMode].map(async ([mode, locs]) => {
+      const rows = await this.pageRisk(clean, locs, mode);
+      rows.forEach((r) => { risk[r.locale] = r.state; });
+    }));
+    return buildPageReference({
+      ref: clean, locales, sourceLocale: this.#sourceLocale, managed, risk,
+    });
   }
 
   // ---- Managed-page manifest + hreflang index -------------------------------

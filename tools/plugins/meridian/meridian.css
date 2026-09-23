@@ -34,8 +34,24 @@
 
 .mrd-head {
   display: flex;
+  flex-wrap: wrap;
+  align-items: center;
   gap: 8px;
   margin-bottom: 10px;
+}
+
+.mrd-page-ref {
+  font-weight: 700;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 100%;
+}
+
+.mrd-counts {
+  display: flex;
+  gap: 6px;
+  margin-left: auto;
 }
 
 .mrd-count {
@@ -47,14 +63,12 @@
   color: var(--mrd-text-muted);
 }
 
-.mrd-count.mrd-critical {
-  background: var(--mrd-critical-tint);
-  color: var(--mrd-critical);
+.mrd-count-live {
+  color: #0d7a54;
 }
 
-.mrd-count.mrd-warning {
-  background: var(--mrd-warning-tint);
-  color: #b06f00;
+.mrd-count-staged {
+  color: var(--mrd-accent);
 }
 
 .mrd-markets {
@@ -69,24 +83,72 @@
   display: flex;
   align-items: center;
   gap: 8px;
-  padding: 5px 0;
+  padding: 6px 0;
   border-top: 1px solid var(--mrd-surface-sunken);
 }
 
-.mrd-status svg {
-  width: 18px;
-  height: 18px;
-  display: block;
+.mrd-dot {
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  flex: 0 0 auto;
+  background: var(--mrd-text-muted);
+}
+
+.mrd-dot-live {
+  background: #0d7a54;
+}
+
+.mrd-dot-staged {
+  background: var(--mrd-accent);
+}
+
+.mrd-dot-missing {
+  background: transparent;
+  border: 1px solid var(--mrd-border);
 }
 
 .mrd-locale {
   font-weight: 700;
-  min-width: 56px;
+  min-width: 44px;
+  text-transform: uppercase;
 }
 
-.mrd-kinds {
+.mrd-status {
   color: var(--mrd-text-muted);
   font-size: 12px;
+}
+
+.mrd-status-live {
+  color: #0d7a54;
+}
+
+.mrd-status-staged {
+  color: var(--mrd-accent);
+}
+
+.mrd-stale {
+  color: #b06f00;
+  font-weight: 700;
+}
+
+.mrd-row-actions {
+  display: flex;
+  gap: 12px;
+  margin-left: auto;
+  white-space: nowrap;
+}
+
+.mrd-row-actions a {
+  color: var(--mrd-accent);
+  text-decoration: none;
+  font-weight: 700;
+  font-size: 12px;
+}
+
+.mrd-row-actions a:hover {
+  color: var(--mrd-accent-hover);
+  text-decoration: underline;
 }
 
 .mrd-actions {
