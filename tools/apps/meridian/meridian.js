@@ -55,7 +55,7 @@ try {
 
 // Deep-link org/site so an author arriving from the editor plugin never
 // re-enters context (the annoyance called out in the Experience Workspace demo).
-const TABS = ['overview', 'exposure', 'taste', 'adapt', 'pages'];
+const TABS = ['overview', 'pages', 'exposure', 'taste', 'adapt'];
 
 // Plain-language one-liners for the jargon-y queue tabs (shown under the tabs).
 const TAB_HELP = {
@@ -822,6 +822,9 @@ class MeridianApp extends LitElement {
           <button role="tab" aria-selected=${this._tab === 'overview'}
             class="mrd-tab ${this._tab === 'overview' ? 'active' : ''}"
             @click=${() => { this._tab = 'overview'; }}>Dashboard</button>
+          <button role="tab" aria-selected=${this._tab === 'pages'}
+            class="mrd-tab ${this._tab === 'pages' ? 'active' : ''}"
+            @click=${() => { this._tab = 'pages'; }}>Localize</button>
           <button role="tab" aria-selected=${this._tab === 'exposure'}
             class="mrd-tab ${this._tab === 'exposure' ? 'active' : ''}"
             @click=${() => { this._tab = 'exposure'; }}>Issues</button>
@@ -831,9 +834,6 @@ class MeridianApp extends LitElement {
           <button role="tab" aria-selected=${this._tab === 'adapt'}
             class="mrd-tab ${this._tab === 'adapt' ? 'active' : ''}"
             @click=${() => { this._tab = 'adapt'; }}>Market rules</button>
-          <button role="tab" aria-selected=${this._tab === 'pages'}
-            class="mrd-tab ${this._tab === 'pages' ? 'active' : ''}"
-            @click=${() => { this._tab = 'pages'; }}>Localize</button>
         </div>
         ${TAB_HELP[this._tab] ? html`<div class="mrd-tab-help">${TAB_HELP[this._tab]}</div>` : nothing}` : nothing}
       ${this._error ? html`<div class="nx-alert warning">${this._error}</div>` : nothing}
@@ -2011,9 +2011,9 @@ class MeridianApp extends LitElement {
           @click=${() => this.translatePages()}>Translate &amp; publish</sl-button>
         <sl-button ?disabled=${this._pageBusy} @click=${() => this.startLocalize()}>Localize</sl-button>
         <sl-button class="primary outline" ?disabled=${this._pageBusy}
-          @click=${() => this.checkStatus()}>Check status</sl-button>
-        <sl-button class="primary outline" ?disabled=${this._pageBusy}
           @click=${() => this.translateFolder()}>Translate folder</sl-button>
+        <sl-button class="primary outline" ?disabled=${this._pageBusy}
+          @click=${() => this.checkStatus()}>Check status</sl-button>
       </div>
       ${this._bulkResults.length ? html`
         <div class="mrd-section-label">Bulk translate — ${this._bulkResults.length} page × market</div>
