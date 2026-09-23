@@ -27,6 +27,9 @@ import { getPageTimestamp, getPageStatus, getStatusConfig } from '../../msm/core
 import { previewPage, publishPage } from '../../msm/core/operations.js';
 import { upsertRows, readSheet } from './da-config.js';
 import { parseLocaleConfig } from './locale-config.js';
+import {
+  markManaged, overwriteBlocked, publishRelPath, buildHreflangIndex,
+} from './managed.js';
 import runWithConcurrency from './concurrency.js';
 
 // A single path segment: letters, digits, underscore, hyphen. No dots (blocks
@@ -100,11 +103,14 @@ export function livePath(base, locale, id) {
   return `${base}/live/${locale}/${relPath(id)}.json`;
 }
 
-// A localized full page (real HTML), materialized under the scoped base so it
-// never collides with the host site's own content: {base}/live/{locale}/{ref}.html
-export function localePagePath(base, locale, ref) {
+// A localized full page (real HTML). In 'sandbox' mode it is materialized under
+// the scoped base ({base}/live/{locale}/{ref}.html) so it never collides with the
+// host site's own content; in 'locale-root' mode it publishes to a clean,
+// SEO-correct URL (/{locale}/{ref}.html). See core/managed.js:publishRelPath.
+export function localePagePath(base, locale, ref, mode = 'sandbox') {
   assertLocale(locale);
-  return `${base}/live/${locale}/${assertPageRef(ref)}.html`;
+  const clean = assertPageRef(ref);
+  return `${publishRelPath(mode, locale, clean, base)}.html`;
 }
 
 // Translation Memory lives once per locale at the site level (shared across all
@@ -206,11 +212,29 @@ export default class DaStore {
 
   #base;
 
-  constructor({ org, site, base = '/meridian' }) {
+  #sourceLocale;
+
+  constructor({
+    org, site, base = '/meridian', sourceLocale = 'en',
+  }) {
     assertSiteRef(org, site);
     this.#org = org;
     this.#site = site;
     this.#base = base.replace(/\/$/, '');
+    this.#sourceLocale = sourceLocale;
+  }
+
+  get sourceLocale() {
+    return this.#sourceLocale;
+  }
+
+  // The source language is the site's own pages, not a market — refuse to write
+  // or publish it as a localized variant so Meridian can never overwrite the real
+  // source page (which lives at the site root, outside the /meridian namespace).
+  #assertNotSource(locale) {
+    if (locale === this.#sourceLocale) {
+      throw new Error(`Refusing to localize into the source locale (${locale}) — that is the source page itself, not a market.`);
+    }
   }
 
   #sourceUrl(path) {
@@ -291,16 +315,52 @@ export default class DaStore {
   // English source's edge timestamp to each localized page's, so an author sees
   // which markets are current, stale (source moved), or not yet localized —
   // exposure over the real published pages. Reuses MSM's getPageTimestamp.
-  async pageRisk(ref, locales) {
+  async pageRisk(ref, locales, mode = 'sandbox') {
     const clean = assertPageRef(ref);
     const src = await getPageTimestamp(this.#org, this.#site, `/${clean}`, 'html').catch(() => ({}));
     const sourceMs = src?.lastModified ?? null;
     return Promise.all(locales.map(async (locale) => {
       assertLocale(locale);
-      const path = `${this.#base}/live/${locale}/${clean}`;
+      const path = localePagePath(this.#base, locale, clean, mode).replace(/\.html$/, '');
       const ts = await getPageTimestamp(this.#org, this.#site, path, 'html').catch(() => ({}));
       return { locale, state: pageRiskState(sourceMs, ts?.lastModified ?? null) };
     }));
+  }
+
+  // ---- Managed-page manifest + hreflang index -------------------------------
+
+  // The list of pages Meridian has materialized (ref + locale + publish mode),
+  // the enumeration source for the dashboard once pages publish to clean locale
+  // roots (where folder-walking /meridian/live no longer finds them). [] when
+  // absent.
+  async readManaged() {
+    const doc = await this.#readJson(`${this.#base}/managed.json`);
+    return Array.isArray(doc?.entries) ? doc.entries : [];
+  }
+
+  // Upsert managed entries (call ONCE per publish batch — read-modify-write is
+  // not safe under concurrency), then rebuild + publish the hreflang index so
+  // pages can fetch /meridian/hreflang.json from the edge. The manifest write
+  // happens first and is what matters; a later hreflang failure throws for the
+  // caller to log without having lost the manifest (the page is already live).
+  async recordManaged(entries) {
+    if (!entries?.length) return;
+    const key = (e) => `${e.locale}|${e.ref}`;
+    const map = new Map((await this.readManaged()).map((e) => [key(e), e]));
+    entries.forEach((e) => map.set(key(e), {
+      ref: assertPageRef(e.ref), locale: e.locale, mode: e.mode || 'sandbox', at: Date.now(),
+    }));
+    const next = [...map.values()];
+    await this.#writeJson(`${this.#base}/managed.json`, { entries: next });
+    await this.#writeJson(`${this.#base}/hreflang.json`, { clusters: buildHreflangIndex(next, this.#sourceLocale) });
+    // Publish the index so runtime pages can read it same-origin on the edge.
+    // Throw on failure (the caller — saveManaged — logs it best-effort) rather
+    // than silently leaving a stale edge index.
+    const idx = `${this.#base}/hreflang`;
+    const prev = await previewPage(this.#org, this.#site, idx, 'json');
+    if (prev.error) throw new Error(`hreflang preview failed: ${prev.error}`);
+    const pub = await publishPage(this.#org, this.#site, idx, 'json');
+    if (pub.error) throw new Error(`hreflang publish failed: ${pub.error}`);
   }
 
   async registerLanguage(locale, name) {
@@ -405,11 +465,21 @@ export default class DaStore {
     return html;
   }
 
-  // Write a localized page (real HTML) under {base}/live/{locale}/{ref}.html.
-  async writeLocalizedPage(locale, ref, html) {
-    const path = localePagePath(this.#base, locale, ref);
+  // Write a localized page (real HTML). In locale-root mode this targets the
+  // host site's own tree, so guard against clobbering a hand-authored page: only
+  // overwrite a target that is absent or already Meridian-managed. Every page we
+  // write is stamped with the ownership marker so that check works next time.
+  async writeLocalizedPage(locale, ref, html, mode = 'sandbox') {
+    this.#assertNotSource(locale);
+    const path = localePagePath(this.#base, locale, ref, mode);
+    if (mode === 'locale-root') {
+      const existing = await this.#readText(path);
+      if (overwriteBlocked(existing, mode)) {
+        throw new Error(`${path.replace(/\.html$/, '')} already exists and isn't managed by Meridian — refusing to overwrite. Remove it, or publish in Sandbox mode.`);
+      }
+    }
     const body = new FormData();
-    body.append('data', new Blob([html], { type: 'text/html' }));
+    body.append('data', new Blob([markManaged(html)], { type: 'text/html' }));
     const resp = await daFetch(this.#sourceUrl(path), { method: 'PUT', body });
     if (!resp.ok) throw new Error(`Write failed for ${path} (${resp.status})`);
     return path;
@@ -417,8 +487,9 @@ export default class DaStore {
 
   // Push a localized page to the edge (preview then publish) and return the real
   // live URL a visitor can open in that language.
-  async publishLocalizedPage(locale, ref) {
-    const path = localePagePath(this.#base, locale, ref).replace(/\.html$/, '');
+  async publishLocalizedPage(locale, ref, mode = 'sandbox') {
+    this.#assertNotSource(locale);
+    const path = localePagePath(this.#base, locale, ref, mode).replace(/\.html$/, '');
     const prev = await previewPage(this.#org, this.#site, path, 'html');
     if (prev.error) throw new Error(`Preview failed for ${locale}: ${prev.error}`);
     const pub = await publishPage(this.#org, this.#site, path, 'html');
@@ -492,13 +563,22 @@ export default class DaStore {
 
   // The coverage matrix: every localized page (rows) × the given locales
   // (columns), each cell current / stale / missing. The portfolio "radar".
-  async localizedMatrix(locales) {
-    const refSet = new Set();
-    await runWithConcurrency(locales.map((loc) => async () => {
-      assertLocale(loc);
-      (await this.#localizedRefs(loc)).forEach((r) => refSet.add(r));
-    }), 4);
-    const refs = [...refSet].sort();
+  // `opts.refs` supplies the page list explicitly (from the managed manifest in
+  // locale-root mode, where folder-walking /meridian/live no longer finds them);
+  // absent, it discovers them from the sandbox tree. `opts.mode` selects the cell
+  // path (sandbox vs locale-root).
+  async localizedMatrix(locales, opts = {}) {
+    const mode = opts.mode || 'sandbox';
+    let { refs } = opts;
+    if (!refs) {
+      const refSet = new Set();
+      await runWithConcurrency(locales.map((loc) => async () => {
+        assertLocale(loc);
+        (await this.#localizedRefs(loc)).forEach((r) => refSet.add(r));
+      }), 4);
+      refs = [...refSet];
+    }
+    refs = [...new Set(refs)].sort();
     // Bound the N pages × M locales timestamp lookups so a big site can't fire
     // hundreds of DA requests at once (reuses MSM's concurrency limiter).
     const srcMs = new Map();
@@ -511,7 +591,7 @@ export default class DaStore {
         srcMs.set(ref, src?.lastModified ?? null);
       });
       locales.forEach((loc) => tasks.push(async () => {
-        const path = `${this.#base}/live/${loc}/${clean}`;
+        const path = localePagePath(this.#base, loc, clean, mode).replace(/\.html$/, '');
         const ts = await getPageTimestamp(this.#org, this.#site, path, 'html').catch(() => ({}));
         cellMs.set(`${ref}|${loc}`, ts?.lastModified ?? null);
       }));

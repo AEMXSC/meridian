@@ -141,6 +141,7 @@ class MeridianApp extends LitElement {
     _recent: { state: true },
     _translate: { state: true },
     _catalog: { state: true },
+    _publishMode: { state: true },
     _edge: { state: true },
     _pageRef: { state: true },
     _pageResults: { state: true },
@@ -190,6 +191,12 @@ class MeridianApp extends LitElement {
     this._sites = [];
     this._translate = null;
     this._catalog = null;
+    // Where materialized pages publish: 'sandbox' (namespaced /meridian/live) or
+    // 'locale-root' (clean /{locale} URLs). Defaults from config; toggleable.
+    this._publishMode = 'sandbox';
+    // The site's source language — never offered as a target market. Set from
+    // config in scan(); 'en' until then.
+    this._sourceLocale = 'en';
     this._edge = new Map();
     this._pageRef = 'international-banking';
     this._pageResults = new Map();
@@ -293,6 +300,17 @@ class MeridianApp extends LitElement {
       this._config = config;
       this._canonicalId = config.canonicalId;
       this._policies = config.policies;
+      // The site's source language (its own pages). Rebuild the store with it so
+      // the store can refuse to localize INTO the source (that's the source page,
+      // not a market) and so hreflang labels the source/x-default correctly.
+      this._sourceLocale = (typeof config.sourceLocale === 'string' && config.sourceLocale)
+        ? config.sourceLocale : 'en';
+      this._store = new DaStore({
+        org: this._org, site: this._site, sourceLocale: this._sourceLocale,
+      });
+      // Publish mode defaults from config (a site can ship in production mode);
+      // otherwise sandbox. The author can still toggle it per session.
+      this._publishMode = config.publishMode === 'locale-root' ? 'locale-root' : 'sandbox';
       this._findings = await scanCanonical(this._store, config.canonicalId, config.policies);
       this._state = 'ready';
       this.saveRecent(this._org, this._site);
@@ -1112,9 +1130,15 @@ class MeridianApp extends LitElement {
     };
   }
 
-  // A store for the current org/site, reused across browse + run.
+  // A store for the current org/site, reused across browse + run. Threads the
+  // known source locale so even this lazy fallback is consistent with the store
+  // scan() builds (source-locale guard + hreflang labeling).
   pageStore() {
-    if (!this._store) this._store = new DaStore({ org: this._org, site: this._site });
+    if (!this._store) {
+      this._store = new DaStore({
+        org: this._org, site: this._site, sourceLocale: this._sourceLocale,
+      });
+    }
     return this._store;
   }
 
@@ -1205,6 +1229,15 @@ class MeridianApp extends LitElement {
     this._pageRisk = [];
   }
 
+  // Switch publish target. Paths differ between modes, so any per-page status
+  // and the coverage matrix are invalidated (they reload on next view).
+  setMode(mode) {
+    if (mode === this._publishMode) return;
+    this._publishMode = mode;
+    this._pageRisk = [];
+    this._matrix = null;
+  }
+
   renderChip(code, name) {
     const on = this._localeSel.has(code);
     return html`
@@ -1218,12 +1251,18 @@ class MeridianApp extends LitElement {
   // quick-pick fallback.
   renderLangChips() {
     const cat = this._catalog;
+    // The source language is the site's own pages, never a target market.
+    const notSource = (code) => code !== this._sourceLocale;
     if (cat && (cat.languages.length || cat.groups.length)) {
+      const languages = cat.languages.filter((l) => notSource(l.code));
+      const groups = cat.groups
+        .map((g) => ({ ...g, locales: g.locales.filter((l) => notSource(l.code)) }))
+        .filter((g) => g.locales.length);
       return html`
-        ${cat.languages.length ? html`
-          <span class="mrd-lang-row">${cat.languages.map((l) => this.renderChip(l.code, l.name))}</span>
+        ${languages.length ? html`
+          <span class="mrd-lang-row">${languages.map((l) => this.renderChip(l.code, l.name))}</span>
         ` : nothing}
-        ${cat.groups.map((g) => {
+        ${groups.map((g) => {
     const codes = g.locales.map((l) => l.code);
     const allOn = codes.every((c) => this._localeSel.has(c));
     return html`
@@ -1237,7 +1276,9 @@ class MeridianApp extends LitElement {
   })}`;
     }
     return html`
-      <span class="mrd-lang-row">${LANG_OPTIONS.map(([code, name]) => this.renderChip(code, name))}</span>`;
+      <span class="mrd-lang-row">
+        ${LANG_OPTIONS.filter(([code]) => notSource(code)).map(([code, name]) => this.renderChip(code, name))}
+      </span>`;
   }
 
   // The published edge URL of a source (English) page, for the side-by-side preview.
@@ -1365,7 +1406,7 @@ class MeridianApp extends LitElement {
     this._pageBusy = true;
     this._pageError = '';
     try {
-      this._pageRisk = await ctx.store.pageRisk(ctx.ref, ctx.locales);
+      this._pageRisk = await ctx.store.pageRisk(ctx.ref, ctx.locales, this._publishMode);
     } catch (e) {
       this._pageError = e.message;
     } finally {
@@ -1402,6 +1443,20 @@ class MeridianApp extends LitElement {
     }
   }
 
+  // Record what we materialized so the dashboard can enumerate managed pages
+  // (essential once they publish to clean locale roots) and the hreflang index
+  // stays current. Best-effort: the pages are already live, so an index hiccup
+  // must never surface as a failure.
+  // eslint-disable-next-line class-methods-use-this
+  async saveManaged(store, entries) {
+    if (!entries.length) return;
+    try {
+      await store.recordManaged(entries);
+    } catch (e) {
+      console.warn('Managed manifest / hreflang update failed:', e.message);
+    }
+  }
+
   async translatePages() {
     const ctx = this.pageInputs();
     if (ctx.error) { this._pageError = ctx.error; return; }
@@ -1410,6 +1465,7 @@ class MeridianApp extends LitElement {
     this._pageError = '';
     this._pageResults = new Map();
     this._localizeDrafts = new Map();
+    const mode = this._publishMode;
     try {
       const source = await ctx.store.readPageHtml(ctx.ref);
       const dnt = await ctx.store.readDnt().catch(() => []);
@@ -1422,8 +1478,8 @@ class MeridianApp extends LitElement {
           // never the flagged ones — TM stores approved translations.
           const learned = new Map([...tmt.learned].filter(([s]) => out.dict.has(s)));
           if (learned.size) await this.saveTm(ctx.store, tm, learned, 'mt', locale);
-          await ctx.store.writeLocalizedPage(locale, ctx.ref, out.html);
-          const pub = await ctx.store.publishLocalizedPage(locale, ctx.ref);
+          await ctx.store.writeLocalizedPage(locale, ctx.ref, out.html, mode);
+          const pub = await ctx.store.publishLocalizedPage(locale, ctx.ref, mode);
           return [locale, {
             ok: true,
             kind: 'translate',
@@ -1441,6 +1497,8 @@ class MeridianApp extends LitElement {
       const settled = await runWithConcurrency(tasks, 3);
       this._pageResults = new Map(settled.map((s) => s.value));
       const ok = [...this._pageResults.values()].filter((r) => r.ok).length;
+      await this.saveManaged(ctx.store, [...this._pageResults]
+        .filter(([, r]) => r.ok).map(([locale]) => ({ ref: ctx.ref, locale, mode })));
       if (ok) this.showToast(`Translated & published ${ok} market(s) of ${ctx.ref}`);
     } catch (e) {
       this._pageError = e.message;
@@ -1466,6 +1524,7 @@ class MeridianApp extends LitElement {
     this._pageError = '';
     this._bulkResults = [];
     this._pageResults = new Map();
+    const mode = this._publishMode;
     try {
       const dnt = await ctx.store.readDnt().catch(() => []);
       // Read each page's source ONCE (not once per locale).
@@ -1502,8 +1561,8 @@ class MeridianApp extends LitElement {
             const out = await localizePage(source, tmt.translate, { to: locale, dnt });
             const acc = learnedByLocale.get(locale);
             tmt.learned.forEach((t, s) => { if (out.dict.has(s)) acc.set(s, t); });
-            await ctx.store.writeLocalizedPage(locale, p, out.html);
-            const pub = await ctx.store.publishLocalizedPage(locale, p);
+            await ctx.store.writeLocalizedPage(locale, p, out.html, mode);
+            const pub = await ctx.store.publishLocalizedPage(locale, p, mode);
             const pct = Math.round((out.coverage?.ratio ?? 0) * 100);
             return {
               ref: p, locale, ok: true, pct, liveUrl: pub.liveUrl,
@@ -1523,6 +1582,8 @@ class MeridianApp extends LitElement {
         if (acc.size) await this.saveTm(ctx.store, tmByLocale.get(locale), acc, 'mt', locale);
       }), 4);
       const ok = this._bulkResults.filter((r) => r.ok).length;
+      await this.saveManaged(ctx.store, this._bulkResults
+        .filter((r) => r.ok).map((r) => ({ ref: r.ref, locale: r.locale, mode })));
       this.showToast(`Bulk translated ${ok}/${this._bulkResults.length} page × market under ${folder || 'site'}`);
     } catch (e) {
       this._pageError = e.message;
@@ -1600,6 +1661,7 @@ class MeridianApp extends LitElement {
     if (!draft?.ok || !store) return;
     this._pageBusy = true;
     this._pageError = '';
+    const mode = this._publishMode;
     try {
       // An override only counts as "authored" if it is non-blank AND — for a
       // low-confidence language suggestion — actually edited away from the
@@ -1621,8 +1683,8 @@ class MeridianApp extends LitElement {
         }),
       );
       const localizedHtml = applyLocalization(this._localizeSource, draft.dict, authored);
-      await store.writeLocalizedPage(locale, this._localizeRef, localizedHtml);
-      const pub = await store.publishLocalizedPage(locale, this._localizeRef);
+      await store.writeLocalizedPage(locale, this._localizeRef, localizedHtml, mode);
+      const pub = await store.publishLocalizedPage(locale, this._localizeRef, mode);
       // Commit the successful publish (result + drop the draft) BEFORE touching
       // TM, so a TM hiccup can never mislabel a live page as failed or lose the
       // draft.
@@ -1641,6 +1703,7 @@ class MeridianApp extends LitElement {
       drafts.delete(locale);
       this._localizeDrafts = drafts;
       this.showToast(`Localized & published ${locale} — live`);
+      await this.saveManaged(store, [{ ref: this._localizeRef, locale, mode }]);
       // Human sign-off becomes durable TM (origin human), reused next run — but
       // it is best-effort: the page is already live.
       if (heldDone) await this.saveTm(store, await store.readTm(locale), authored, 'human', locale);
@@ -1822,6 +1885,20 @@ class MeridianApp extends LitElement {
         commercial &amp; compliance segments before publishing — the difference between a
         <em>translated</em> page and a <em>localized</em> one.
       </p>
+      <div class="mrd-publish-mode" role="group" aria-label="Publish target">
+        <span class="mrd-lang-group-label">Publish to</span>
+        <button class="mrd-mode-opt ${this._publishMode === 'sandbox' ? 'on' : ''}"
+          aria-pressed=${this._publishMode === 'sandbox'} ?disabled=${this._pageBusy}
+          @click=${() => this.setMode('sandbox')}>Sandbox <code>/meridian/live/…</code></button>
+        <button class="mrd-mode-opt ${this._publishMode === 'locale-root' ? 'on' : ''}"
+          aria-pressed=${this._publishMode === 'locale-root'} ?disabled=${this._pageBusy}
+          @click=${() => this.setMode('locale-root')}>Live <code>/{locale}/…</code></button>
+      </div>
+      ${this._publishMode === 'locale-root' ? html`
+        <div class="mrd-entry-meta mrd-mode-note">
+          Publishing to real locale URLs (e.g. <code>/fr/${this._pageRef || 'page'}</code>). Existing
+          non-Meridian pages are protected — Meridian won't overwrite a page it didn't create.
+        </div>` : nothing}
       <div class="mrd-page-form">
         <label id="mrd-page-lbl">Page</label>
         <button class="mrd-page-pick" aria-labelledby="mrd-page-lbl" aria-haspopup="tree"
@@ -1907,11 +1984,23 @@ class MeridianApp extends LitElement {
       // target from DA's locale config — even ones not yet localized — not just
       // the folders that already exist.
       if (this._catalog === null) await this.loadCatalog();
-      const discovered = await store.listLocales();
-      const configured = this._catalog?.all ?? [];
-      const locales = [...new Set([...configured, ...discovered])];
-      this._matrixLocales = locales;
-      this._matrix = locales.length ? await store.localizedMatrix(locales) : [];
+      // Configured markets, minus the source language (its own pages aren't a market).
+      const configured = (this._catalog?.all ?? []).filter((c) => c !== this._sourceLocale);
+      const mode = this._publishMode;
+      if (mode === 'locale-root') {
+        // Clean-URL pages live in the host tree, so folder-walking can't find
+        // them — enumerate from the managed manifest instead.
+        const rooted = (await store.readManaged()).filter((e) => e.mode === 'locale-root');
+        const refs = [...new Set(rooted.map((e) => e.ref))];
+        const locales = [...new Set([...configured, ...rooted.map((e) => e.locale)])];
+        this._matrixLocales = locales;
+        this._matrix = refs.length ? await store.localizedMatrix(locales, { refs, mode }) : [];
+      } else {
+        const discovered = await store.listLocales();
+        const locales = [...new Set([...configured, ...discovered])];
+        this._matrixLocales = locales;
+        this._matrix = locales.length ? await store.localizedMatrix(locales, { mode }) : [];
+      }
     } catch (e) {
       this._error = e.message;
       this._matrix = [];

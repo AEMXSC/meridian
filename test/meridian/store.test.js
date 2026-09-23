@@ -52,6 +52,16 @@ test('localePagePath scopes a localized page under the locale folder', () => {
   assert.equal(localePagePath('/meridian', 'es', 'student/checking'), '/meridian/live/es/student/checking.html');
 });
 
+test('localePagePath in locale-root mode publishes to a clean /{locale} URL', () => {
+  assert.equal(
+    localePagePath('/meridian', 'fr', 'international-banking', 'locale-root'),
+    '/fr/international-banking.html',
+  );
+  assert.equal(localePagePath('/meridian', 'es', 'student/checking', 'locale-root'), '/es/student/checking.html');
+  // Still guards traversal in either mode.
+  assert.throws(() => localePagePath('/meridian', 'es/mx', 'x', 'locale-root'), /Unsafe locale/);
+});
+
 test('tmPath scopes translation memory per locale under the base', () => {
   assert.equal(tmPath('/meridian', 'es'), '/meridian/tm/es.json');
   assert.throws(() => tmPath('/meridian', '../etc'), /Unsafe locale/);

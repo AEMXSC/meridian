@@ -92,6 +92,37 @@ Phrase, a private model) and wire it into `handleTranslate`. Only the **language
 layer is machine-translated; commercial/compliance stay human-owned (PRD §11), and
 every machine result is quality-gated before publish.
 
+## Publish mode & SEO (sandbox vs production)
+
+Localized pages can publish two ways (toggle in the **Localize** tab, or default it
+per site with `publishMode` in `/meridian/config.json`):
+
+- **`sandbox`** (default) — pages go to `/meridian/live/{locale}/{ref}`. Namespaced,
+  collision-free, ideal for demos and trials.
+- **`locale-root`** (production) — pages go to a clean, SEO-correct URL:
+  `/{locale}/{ref}` (e.g. `/fr/international-banking`). The canonical object and
+  adaptation layers still stay internal under `/meridian`; only the *rendered page*
+  moves. Publish target for each market is derived from DA's `translate-v2.json`
+  `location` convention.
+
+Guardrails that ship with production mode:
+
+- **Collision guard.** Every Meridian page carries an ownership marker; in
+  locale-root mode Meridian refuses to overwrite a target that exists and isn't
+  Meridian-managed, so it never clobbers hand-authored `/{locale}/…` content.
+- **Managed manifest.** `/meridian/managed.json` records what Meridian materialized
+  (ref · locale · mode), so the coverage dashboard still enumerates localized pages
+  once they live in the host tree.
+- **hreflang.** Meridian publishes `/meridian/hreflang.json` (reciprocal alternate
+  map per page cluster, with `x-default`). Add the one-line integration to the host
+  site's `scripts.js` to inject `<link rel="alternate" hreflang>` on source and
+  localized pages — no host content is mutated:
+
+  ```js
+  import injectHreflang from '/tools/apps/meridian/integration/hreflang.js';
+  injectHreflang(); // safe to call unconditionally
+  ```
+
 ## Invariant
 
 Materialized variants are artifacts: delete `/meridian/live` and recompute from
