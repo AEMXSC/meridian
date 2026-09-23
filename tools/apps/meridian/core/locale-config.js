@@ -53,10 +53,17 @@ function combine(base, region) {
   return base || region;
 }
 
+// A DA `site` cell → a safe repo name, or undefined (meaning "the base site").
+// DA allows a leading slash; repo names are single safe segments.
+function siteOf(raw) {
+  const s = String(raw ?? '').replace(/^\/+/, '').trim();
+  return s && SAFE.test(s) ? s : undefined;
+}
+
 /**
  * Normalize /.da/translate-v2.json into Meridian's locale catalog.
  * @param {object|Array|null} doc - the parsed translate-v2.json (or null)
- * @returns {{languages: object[], groups: object[], all: string[]}} catalog
+ * @returns {{languages: object[], groups: object[], all: string[], siteByCode: object}} catalog
  */
 export function parseLocaleConfig(doc) {
   // readSheet guarantees an array but not that its elements are objects; a
@@ -67,18 +74,33 @@ export function parseLocaleConfig(doc) {
   const localeRows = readSheet(doc, 'locales').filter(isObj);
 
   const languages = langRows
-    .map((row) => ({ code: localeCode(row.location), name: String(row.name ?? '').trim() }))
+    .map((row) => {
+      const site = siteOf(row.site);
+      return {
+        code: localeCode(row.location),
+        name: String(row.name ?? '').trim(),
+        ...(site ? { site } : {}),
+      };
+    })
     // Drop the root/source language (empty token) and any unsafe token.
     .filter((lang) => lang.code && SAFE.test(lang.code));
 
   const groups = localeRows
     .map((row) => {
       const region = localeCode(row.location);
+      // A group (region) can target its own repo; that overrides a per-language
+      // site, matching DA's loc app (it keys a locale variant's site off the
+      // locale/region row).
+      const groupSite = siteOf(row.site);
       const locales = langRows
-        .map((lang) => ({
-          code: combine(localeCode(lang.location), region),
-          name: String(lang.name ?? '').trim(),
-        }))
+        .map((lang) => {
+          const site = groupSite ?? siteOf(lang.site);
+          return {
+            code: combine(localeCode(lang.location), region),
+            name: String(lang.name ?? '').trim(),
+            ...(site ? { site } : {}),
+          };
+        })
         .filter((loc) => loc.code && SAFE.test(loc.code));
       return { name: String(row.name ?? '').trim() || region, region, locales };
     })
@@ -89,5 +111,16 @@ export function parseLocaleConfig(doc) {
     ...groups.flatMap((group) => group.locales.map((loc) => loc.code)),
   ])];
 
-  return { languages, groups, all };
+  // A quick locale-token -> target repo lookup for callers that publish per
+  // market into a different site. Only codes with an explicit site appear; all
+  // others default to the base site at the call site.
+  const siteByCode = {};
+  languages.forEach((lang) => { if (lang.site) siteByCode[lang.code] = lang.site; });
+  groups.forEach((group) => group.locales.forEach((loc) => {
+    if (loc.site && !siteByCode[loc.code]) siteByCode[loc.code] = loc.site;
+  }));
+
+  return {
+    languages, groups, all, siteByCode,
+  };
 }

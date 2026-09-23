@@ -220,9 +220,11 @@ class MeridianApp extends LitElement {
     this._overlayLocale = '';
     this._localizeSource = '';
     this._localizeRef = '';
-    // The store a Localize draft was staged against — captured so a later
-    // Publish can never target a since-repointed org/site.
+    // The store + base org/site a Localize draft was staged against — captured so
+    // a later Publish can never target a since-repointed org/site.
     this._localizeStore = null;
+    this._localizeOrg = '';
+    this._localizeSite = '';
     // Deep-link / editor context wins; otherwise fall back to the most recent
     // org/site so a returning author lands where they left off.
     this._org = this._org || (this._recent[0]?.org ?? '');
@@ -281,6 +283,7 @@ class MeridianApp extends LitElement {
     this._matrix = null;
     this._matrixLocales = [];
     this._catalog = null;
+    this._siteStores = null;
     this._allPages = null;
     this._pageRisk = [];
     this._bulkResults = [];
@@ -1151,6 +1154,26 @@ class MeridianApp extends LitElement {
     return this._store;
   }
 
+  // The repo a market publishes into. A DA locale config can route a market to
+  // its own site (the `site` column); otherwise it's the base site.
+  siteForLocale(code) {
+    return this._catalog?.siteByCode?.[code] || this._site;
+  }
+
+  // A store bound to a specific target site (cached). The base site reuses the
+  // primary store; other sites get their own, so cross-repo publishing writes to
+  // the right place. Source pages are always READ from the base store.
+  storeForSite(site) {
+    if (!site || site === this._site) return this.pageStore();
+    if (!this._siteStores) this._siteStores = new Map();
+    if (!this._siteStores.has(site)) {
+      this._siteStores.set(site, new DaStore({
+        org: this._org, site, sourceLocale: this._sourceLocale,
+      }));
+    }
+    return this._siteStores.get(site);
+  }
+
   // ---- Page tree (browse real site pages instead of typing a path) ---------
   async loadFolder(path) {
     if (!this._org || !this._site) { this._pageError = 'Set org/site first.'; return; }
@@ -1415,7 +1438,7 @@ class MeridianApp extends LitElement {
     this._pageBusy = true;
     this._pageError = '';
     try {
-      this._pageRisk = await ctx.store.pageRisk(ctx.ref, ctx.locales, this._publishMode);
+      this._pageRisk = await this.pageRiskMultiSite(ctx.ref, ctx.locales, this._publishMode);
     } catch (e) {
       this._pageError = e.message;
     } finally {
@@ -1438,6 +1461,8 @@ class MeridianApp extends LitElement {
   clearDrafts() {
     this._localizeDrafts = new Map();
     this._localizeStore = null;
+    this._localizeOrg = '';
+    this._localizeSite = '';
     this._pageError = '';
   }
 
@@ -1466,6 +1491,40 @@ class MeridianApp extends LitElement {
     }
   }
 
+  // Record entries against the RIGHT site's manifest — a batch may span markets
+  // that publish into different repos, so group by target site first.
+  async saveManagedGrouped(entries) {
+    if (!entries.length) return;
+    const grouped = this.groupBySite(entries.map((e) => e.locale));
+    await Promise.all([...grouped].map(([site, locales]) => {
+      const list = entries.filter((e) => locales.includes(e.locale));
+      return this.saveManaged(this.storeForSite(site), list);
+    }));
+  }
+
+  // Partition locale tokens by their target repo (base site unless the DA config
+  // routes a market elsewhere). Returns Map<site, locale[]>.
+  groupBySite(locales) {
+    const bySite = new Map();
+    locales.forEach((code) => {
+      const site = this.siteForLocale(code);
+      if (!bySite.has(site)) bySite.set(site, []);
+      bySite.get(site).push(code);
+    });
+    return bySite;
+  }
+
+  // Per-page risk radar across markets that may live in different repos: query
+  // each target site's store, then merge back into the requested locale order.
+  async pageRiskMultiSite(ref, locales, mode) {
+    const byLocale = new Map();
+    await Promise.all([...this.groupBySite(locales)].map(async ([site, locs]) => {
+      const rows = await this.storeForSite(site).pageRisk(ref, locs, mode);
+      rows.forEach((r) => byLocale.set(r.locale, r));
+    }));
+    return locales.map((code) => byLocale.get(code) || { locale: code, state: 'missing' });
+  }
+
   async translatePages() {
     const ctx = this.pageInputs();
     if (ctx.error) { this._pageError = ctx.error; return; }
@@ -1480,15 +1539,18 @@ class MeridianApp extends LitElement {
       const dnt = await ctx.store.readDnt().catch(() => []);
       const tasks = ctx.locales.map((locale) => async () => {
         try {
-          const tm = await ctx.store.readTm(locale);
+          // The market may publish into its own repo (DA `site` column); TM lives
+          // with the localized page, so read/write it on the target store too.
+          const targetStore = this.storeForSite(this.siteForLocale(locale));
+          const tm = await targetStore.readTm(locale);
           const tmt = createTmTranslator({ tm, translate: ctx.translate });
           const out = await localizePage(source, tmt.translate, { to: locale, dnt });
           // Learn only the translations that PASSED the quality gate (out.dict),
           // never the flagged ones — TM stores approved translations.
           const learned = new Map([...tmt.learned].filter(([s]) => out.dict.has(s)));
-          if (learned.size) await this.saveTm(ctx.store, tm, learned, 'mt', locale);
-          await ctx.store.writeLocalizedPage(locale, ctx.ref, out.html, mode);
-          const pub = await ctx.store.publishLocalizedPage(locale, ctx.ref, mode);
+          if (learned.size) await this.saveTm(targetStore, tm, learned, 'mt', locale);
+          await targetStore.writeLocalizedPage(locale, ctx.ref, out.html, mode);
+          const pub = await targetStore.publishLocalizedPage(locale, ctx.ref, mode);
           return [locale, {
             ok: true,
             kind: 'translate',
@@ -1506,7 +1568,7 @@ class MeridianApp extends LitElement {
       const settled = await runWithConcurrency(tasks, 3);
       this._pageResults = new Map(settled.map((s) => s.value));
       const ok = [...this._pageResults.values()].filter((r) => r.ok).length;
-      await this.saveManaged(ctx.store, [...this._pageResults]
+      await this.saveManagedGrouped([...this._pageResults]
         .filter(([, r]) => r.ok).map(([locale]) => ({ ref: ctx.ref, locale, mode })));
       if (ok) this.showToast(`Translated & published ${ok} market(s) of ${ctx.ref}`);
     } catch (e) {
@@ -1550,7 +1612,7 @@ class MeridianApp extends LitElement {
       const tmByLocale = new Map();
       const learnedByLocale = new Map();
       await runWithConcurrency(ctx.locales.map((locale) => async () => {
-        tmByLocale.set(locale, await ctx.store.readTm(locale));
+        tmByLocale.set(locale, await this.storeForSite(this.siteForLocale(locale)).readTm(locale));
         learnedByLocale.set(locale, new Map());
       }), 4);
 
@@ -1570,8 +1632,9 @@ class MeridianApp extends LitElement {
             const out = await localizePage(source, tmt.translate, { to: locale, dnt });
             const acc = learnedByLocale.get(locale);
             tmt.learned.forEach((t, s) => { if (out.dict.has(s)) acc.set(s, t); });
-            await ctx.store.writeLocalizedPage(locale, p, out.html, mode);
-            const pub = await ctx.store.publishLocalizedPage(locale, p, mode);
+            const targetStore = this.storeForSite(this.siteForLocale(locale));
+            await targetStore.writeLocalizedPage(locale, p, out.html, mode);
+            const pub = await targetStore.publishLocalizedPage(locale, p, mode);
             const pct = Math.round((out.coverage?.ratio ?? 0) * 100);
             return {
               ref: p, locale, ok: true, pct, liveUrl: pub.liveUrl,
@@ -1585,13 +1648,14 @@ class MeridianApp extends LitElement {
       }));
       const settled = await runWithConcurrency(tasks, 3);
       this._bulkResults = settled.map((s) => s.value);
-      // One merged TM write per locale.
+      // One merged TM write per locale, on that market's target store.
       await runWithConcurrency(ctx.locales.map((locale) => async () => {
         const acc = learnedByLocale.get(locale);
-        if (acc.size) await this.saveTm(ctx.store, tmByLocale.get(locale), acc, 'mt', locale);
+        const targetStore = this.storeForSite(this.siteForLocale(locale));
+        if (acc.size) await this.saveTm(targetStore, tmByLocale.get(locale), acc, 'mt', locale);
       }), 4);
       const ok = this._bulkResults.filter((r) => r.ok).length;
-      await this.saveManaged(ctx.store, this._bulkResults
+      await this.saveManagedGrouped(this._bulkResults
         .filter((r) => r.ok).map((r) => ({ ref: r.ref, locale: r.locale, mode })));
       this.showToast(`Bulk translated ${ok}/${this._bulkResults.length} page × market under ${folder || 'site'}`);
     } catch (e) {
@@ -1614,16 +1678,21 @@ class MeridianApp extends LitElement {
     try {
       this._localizeSource = await ctx.store.readPageHtml(ctx.ref);
       this._localizeRef = ctx.ref;
-      // Bind the draft to the exact store it was staged against.
+      // Bind the draft to the exact store + base org/site it was staged against,
+      // so a later Publish can detect a since-repointed org/site and refuse.
       this._localizeStore = ctx.store;
+      this._localizeOrg = this._org;
+      this._localizeSite = this._site;
       const dnt = await ctx.store.readDnt().catch(() => []);
       const tasks = ctx.locales.map((locale) => async () => {
         try {
-          const tm = await ctx.store.readTm(locale);
+          // TM lives with the localized page — on the market's target store.
+          const targetStore = this.storeForSite(this.siteForLocale(locale));
+          const tm = await targetStore.readTm(locale);
           const tmt = createTmTranslator({ tm, translate: ctx.translate });
           const out = await localizePage(this._localizeSource, tmt.translate, { to: locale, dnt });
           const learned = new Map([...tmt.learned].filter(([s]) => out.dict.has(s)));
-          if (learned.size) await this.saveTm(ctx.store, tm, learned, 'mt', locale);
+          if (learned.size) await this.saveTm(targetStore, tm, learned, 'mt', locale);
           // Prefill each review field: a low-confidence language segment starts
           // from its machine attempt (to verify/fix); commercial/compliance
           // start from any prior human sign-off in TM (reuse, not re-authoring).
@@ -1666,8 +1735,16 @@ class MeridianApp extends LitElement {
   // overrides and publish the fully localized page for one market.
   async publishLocalized(locale) {
     const draft = this._localizeDrafts.get(locale);
-    const store = this._localizeStore;
-    if (!draft?.ok || !store) return;
+    if (!draft?.ok || !this._localizeStore) return;
+    // Refuse if org OR site was repointed after the draft was staged (the target
+    // store is resolved against the current org/site, so a repoint would
+    // mis-target — including a same-named site under a different org).
+    if (this._org !== this._localizeOrg || this._site !== this._localizeSite) {
+      this._pageError = 'Org/site changed since this draft was staged — re-run Localize.';
+      return;
+    }
+    // The market may publish into its own repo (DA `site` column).
+    const store = this.storeForSite(this.siteForLocale(locale));
     this._pageBusy = true;
     this._pageError = '';
     const mode = this._publishMode;
@@ -1988,7 +2065,6 @@ class MeridianApp extends LitElement {
     this._matrixBusy = true;
     this._error = '';
     try {
-      const store = this.pageStore();
       // Ensure the configured markets are known so the matrix shows every
       // target from DA's locale config — even ones not yet localized — not just
       // the folders that already exist.
@@ -1996,20 +2072,46 @@ class MeridianApp extends LitElement {
       // Configured markets, minus the source language (its own pages aren't a market).
       const configured = (this._catalog?.all ?? []).filter((c) => c !== this._sourceLocale);
       const mode = this._publishMode;
-      if (mode === 'locale-root') {
-        // Clean-URL pages live in the host tree, so folder-walking can't find
-        // them — enumerate from the managed manifest instead.
-        const rooted = (await store.readManaged()).filter((e) => e.mode === 'locale-root');
-        const refs = [...new Set(rooted.map((e) => e.ref))];
-        const locales = [...new Set([...configured, ...rooted.map((e) => e.locale)])];
-        this._matrixLocales = locales;
-        this._matrix = refs.length ? await store.localizedMatrix(locales, { refs, mode }) : [];
-      } else {
-        const discovered = await store.listLocales();
-        const locales = [...new Set([...configured, ...discovered])];
-        this._matrixLocales = locales;
-        this._matrix = locales.length ? await store.localizedMatrix(locales, { mode }) : [];
-      }
+      // Markets can live in different repos, so compute a coverage sub-matrix per
+      // target site and merge by page. Scan the base site plus any site the
+      // config routes a configured market to.
+      const sites = new Set([this._site, ...configured.map((c) => this.siteForLocale(c))]);
+      const rowsByRef = new Map(); // ref -> Map(locale -> cell)
+      const localeSet = new Set(configured);
+      await runWithConcurrency([...sites].map((site) => async () => {
+        const store = this.storeForSite(site);
+        const here = (code) => this.siteForLocale(code) === site && code !== this._sourceLocale;
+        const siteLocales = new Set(configured.filter(here));
+        let siteRefs;
+        if (mode === 'locale-root') {
+          const rooted = (await store.readManaged()).filter((e) => e.mode === 'locale-root' && here(e.locale));
+          rooted.forEach((e) => siteLocales.add(e.locale));
+          siteRefs = [...new Set(rooted.map((e) => e.ref))];
+        } else {
+          (await store.listLocales()).filter(here).forEach((l) => siteLocales.add(l));
+        }
+        const locs = [...siteLocales];
+        if (!locs.length) return;
+        locs.forEach((l) => localeSet.add(l));
+        let sub = [];
+        if (mode === 'locale-root') {
+          if (siteRefs.length) sub = await store.localizedMatrix(locs, { refs: siteRefs, mode });
+        } else {
+          sub = await store.localizedMatrix(locs, { mode });
+        }
+        sub.forEach((row) => {
+          if (!rowsByRef.has(row.ref)) rowsByRef.set(row.ref, new Map());
+          const rc = rowsByRef.get(row.ref);
+          row.cells.forEach((c) => rc.set(c.locale, c));
+        });
+      }), 4);
+      const locales = [...localeSet];
+      const refs = [...rowsByRef.keys()].sort();
+      this._matrixLocales = locales;
+      this._matrix = refs.map((ref) => ({
+        ref,
+        cells: locales.map((loc) => rowsByRef.get(ref).get(loc) || { locale: loc, state: 'missing', at: null }),
+      }));
     } catch (e) {
       this._error = e.message;
       this._matrix = [];

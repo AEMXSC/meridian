@@ -62,7 +62,20 @@ market — even ones not yet localized. No reconfiguration; Meridian just layers
 quality gating + exposure on top. Sites with no `translate-v2.json` fall back to
 folder discovery + a common quick-pick list, exactly as before.
 
-Meridian reads `/meridian/config.json` (`{ canonicalId, policies: [{ locale, requiredLayers }] }`)
+**Per-market repos (multi-site).** A `translate-v2.json` row may carry a `site`
+column to route that market into its own repo (a region-specific site), matching
+the DA loc app. Meridian reads the source page from the base site and
+writes/publishes each market into its configured target site, keeping a managed
+manifest + hreflang index per site. The status radar and coverage dashboard scan
+every routed site (not just the base). *Two follow-ups:* (1) a cross-site
+market's staleness check compares against its own repo's source timestamp (which
+isn't there), so a cross-site page reports `current`/`missing` correctly but never
+`stale` — fixing it needs the base site's source timestamp threaded into the
+target-site risk check; (2) hreflang is within-site, so cross-repo/cross-domain
+reciprocal alternates are not yet emitted.
+
+Meridian reads `/meridian/config.json` (`{ canonicalId, policies: [{ locale, requiredLayers }],
+sourceLocale?, publishMode?, formality?, glossaries? }`)
 and content under `/meridian/canon`, `/meridian/adapt/{locale}`, `/meridian/live/{locale}`.
 Two ways to stand that up:
 

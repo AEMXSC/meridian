@@ -28,7 +28,9 @@ test('localeCode turns a DA location path into a safe Meridian locale token', ()
 });
 
 test('parseLocaleConfig on an absent or empty doc yields an empty catalog', () => {
-  const empty = { languages: [], groups: [], all: [] };
+  const empty = {
+    languages: [], groups: [], all: [], siteByCode: {},
+  };
   assert.deepEqual(parseLocaleConfig(null), empty);
   assert.deepEqual(parseLocaleConfig({ ':type': 'multi-sheet', ':names': [] }), empty);
 });
@@ -98,5 +100,31 @@ test('parseLocaleConfig drops groups that resolve to no safe locales', () => {
     languages: { data: [{ name: 'Root', location: '' }] },
     locales: { data: [{ name: 'Nowhere', location: '' }] },
   };
-  assert.deepEqual(parseLocaleConfig(doc), { languages: [], groups: [], all: [] });
+  assert.deepEqual(parseLocaleConfig(doc), {
+    languages: [], groups: [], all: [], siteByCode: {},
+  });
+});
+
+test('parseLocaleConfig captures per-market target sites (DA `site` column)', () => {
+  const doc = {
+    ':type': 'multi-sheet',
+    ':names': ['languages', 'locales'],
+    languages: {
+      data: [
+        { name: 'German', location: '/de', site: 'citizens-de' },
+        { name: 'French', location: '/fr' }, // no site → base site
+      ],
+    },
+    locales: {
+      // A region group can target its own repo, overriding the language's site.
+      data: [{ name: 'Canada', location: '/ca', site: '/citizens-ca' }],
+    },
+  };
+  const { languages, siteByCode } = parseLocaleConfig(doc);
+  assert.deepEqual(languages[0], { code: 'de', name: 'German', site: 'citizens-de' });
+  assert.deepEqual(languages[1], { code: 'fr', name: 'French' }, 'no site key when unset');
+  assert.equal(siteByCode.de, 'citizens-de');
+  assert.equal(siteByCode['de-ca'], 'citizens-ca', 'group site overrides + strips leading slash');
+  assert.equal(siteByCode['fr-ca'], 'citizens-ca');
+  assert.equal('fr' in siteByCode, false, 'base-site locales are absent from the map');
 });

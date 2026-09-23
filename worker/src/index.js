@@ -325,14 +325,15 @@ async function runProvider(payload, env) {
     },
     free: { ok: () => true, go: () => translateFree(strings, from, to) },
   };
-  // Explicit provider must be configured; 'auto' picks the first configured one
-  // in preference order (DeepL -> Google -> Microsoft -> Libre -> free).
-  if (provider !== 'auto' && registry[provider]) {
-    if (!registry[provider].ok()) {
-      throw Object.assign(new Error(`${provider} provider is not configured`), { httpError: 400 });
-    }
-    return { translations: await registry[provider].go(), used: provider };
+  // Explicit provider: reject an unknown name, and a known-but-unconfigured one,
+  // rather than silently falling through to auto-select.
+  if (provider !== 'auto') {
+    const chosen = registry[provider];
+    if (!chosen) throw Object.assign(new Error(`unknown provider: ${provider}`), { httpError: 400 });
+    if (!chosen.ok()) throw Object.assign(new Error(`${provider} provider is not configured`), { httpError: 400 });
+    return { translations: await chosen.go(), used: provider };
   }
+  // 'auto' picks the first configured provider (DeepL -> Google -> Microsoft -> Libre -> free).
   const used = ['deepl', 'google', 'microsoft', 'libre', 'free'].find((n) => registry[n].ok());
   return { translations: await registry[used].go(), used };
 }
@@ -370,10 +371,13 @@ async function handleGlossary(payload, request, env) {
   if (!env?.DEEPL_KEY) return json({ error: 'glossaries require DEEPL_KEY' }, 400, request);
   if (!source || !target) return json({ error: 'source and target languages required' }, 400, request);
   const pairs = Array.isArray(entries) ? entries : Object.entries(entries || {});
+  // TSV rows are tab-separated and newline-delimited; a term containing either
+  // would inject extra/garbled rows into the glossary, so drop those entries.
+  const hasSep = (v) => /[\t\r\n]/.test(v);
   const clean = pairs
     .filter((p) => Array.isArray(p) && p[0] && p[1])
     .map(([s, t]) => [String(s).trim(), String(t).trim()])
-    .filter(([s, t]) => s && t && !s.includes('\t') && !t.includes('\t'));
+    .filter(([s, t]) => s && t && !hasSep(s) && !hasSep(t));
   if (!clean.length) return json({ error: 'at least one { source: target } entry required' }, 400, request);
   if (clean.length > 5000) return json({ error: 'too many entries (max 5000)' }, 400, request);
   if (!(await daAuthorized(request.headers.get('Authorization'), org, site))) {
