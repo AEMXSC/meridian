@@ -2246,9 +2246,7 @@ customElements.define('meridian-app', MeridianApp);
     cmp.context = sdk.context;
     cmp._org = cmp._org || sdk.context.org || '';
     cmp._site = cmp._site || sdk.context.site || sdk.context.repo || '';
-    // Offer every org the user can access (not just recents) now that we have a
-    // DA session, and every site in the current org.
-    cmp.loadOrgs();
+    // Load the current org's site list so the picker offers every site.
     if (cmp._org) cmp.loadSites();
     if (cmp._org && cmp._site) cmp.scan();
   } else {

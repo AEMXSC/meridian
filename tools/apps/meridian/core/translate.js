@@ -104,8 +104,13 @@ export function createTranslator(fetchImpl, opts = {}) {
       }),
     });
     if (!resp.ok) {
-      const detail = resp.headers?.get?.('x-error') || `HTTP ${resp.status}`;
-      throw new Error(`translation failed: ${detail}`);
+      // Prefer the x-error header; fall back to the JSON body's error (robust to
+      // CORS/header quirks) so the real reason always surfaces, not "HTTP 500".
+      let detail = resp.headers?.get?.('x-error');
+      if (!detail) {
+        try { detail = (await resp.clone().json())?.error; } catch { /* not JSON */ }
+      }
+      throw new Error(`translation failed: ${detail || `HTTP ${resp.status}`}`);
     }
     const data = await resp.json();
     return toMap(unique, data);
