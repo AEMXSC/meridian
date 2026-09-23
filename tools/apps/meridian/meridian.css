@@ -314,7 +314,7 @@
   text-transform: uppercase;
 }
 
-/* Result-row action cluster (View live · Copy link · Edit in DA) */
+/* Result-row action cluster (View live · Copy link · Edit in EW) */
 .mrd-market-actions {
   margin-left: auto;
   display: flex;
@@ -925,6 +925,33 @@
   color: var(--mrd-text-muted);
 }
 
+/* In-progress indicator while a page action runs */
+.mrd-busy {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: var(--mrd-space-200);
+  padding: 10px 14px;
+  border: 1px solid var(--mrd-border);
+  border-radius: var(--mrd-radius-control);
+  background: var(--mrd-surface);
+  font-size: 14px;
+  font-weight: 700;
+}
+
+.mrd-spinner {
+  width: 16px;
+  height: 16px;
+  border: 2px solid var(--mrd-border);
+  border-top-color: var(--mrd-accent);
+  border-radius: 50%;
+  animation: mrd-spin 0.7s linear infinite;
+}
+
+@keyframes mrd-spin {
+  to { transform: rotate(360deg); }
+}
+
 /* Localization risk radar chips */
 .mrd-risk {
   display: flex;
@@ -1026,11 +1053,13 @@
 
 /* A coverage cell is a shortcut into Localize for that page + market */
 .mrd-matrix-cell {
+  display: inline-block;
   font: inherit;
   padding: 2px;
   border: 1px solid transparent;
   border-radius: var(--mrd-radius-control);
   background: none;
+  text-decoration: none;
   cursor: pointer;
 }
 

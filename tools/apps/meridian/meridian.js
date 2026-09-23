@@ -163,6 +163,7 @@ class MeridianApp extends LitElement {
     _pageRef: { state: true },
     _pageResults: { state: true },
     _pageBusy: { state: true },
+    _pageBusyMsg: { state: true },
     _pageError: { state: true },
     _localizeDrafts: { state: true },
     _localeSel: { state: true },
@@ -220,6 +221,7 @@ class MeridianApp extends LitElement {
     this._pageRef = 'international-banking';
     this._pageResults = new Map();
     this._pageBusy = false;
+    this._pageBusyMsg = '';
     this._pageError = '';
     this._localizeDrafts = new Map();
     this._localeSel = new Set(['es', 'it']);
@@ -1400,7 +1402,8 @@ class MeridianApp extends LitElement {
     this._toastTimer = setTimeout(() => { this._toast = ''; }, 4000);
   }
 
-  // Deep link straight into the DA editor for a materialized localized page (a
+  // Deep link straight into the Experience Workspace (DA) editor for a
+  // materialized localized page (a
   // scoped source path like /meridian/live/es/international-banking) so an author
   // can hand-edit it — the "Edit" escape hatch the DA loc app offers.
   daEditUrl(path) {
@@ -1510,6 +1513,7 @@ class MeridianApp extends LitElement {
     this._pageBusy = true;
     this._pageError = '';
     try {
+      this._pageBusyMsg = `Checking ${ctx.locales.length} market(s)…`;
       this._pageRisk = await this.pageRiskMultiSite(ctx.ref, ctx.locales, this._publishMode);
     } catch (e) {
       this._pageError = e.message;
@@ -1551,6 +1555,7 @@ class MeridianApp extends LitElement {
     this._pageBusy = true;
     this._pageError = '';
     try {
+      this._pageBusyMsg = `Promoting ${locale} to live…`;
       const pub = await this.storeForSite(this.siteForLocale(locale)).promotePage(locale, ref);
       await this.saveManagedGrouped([{ ref, locale, mode: 'locale-root' }]);
       this.patchResult(locale, { promoted: true, liveUrl: pub.liveUrl, path: pub.path });
@@ -1568,6 +1573,7 @@ class MeridianApp extends LitElement {
     this._pageBusy = true;
     this._pageError = '';
     try {
+      this._pageBusyMsg = `Requesting approval for ${locale}…`;
       await this.storeForSite(this.siteForLocale(locale)).writePromotionRequest({
         ref,
         locale,
@@ -1691,6 +1697,7 @@ class MeridianApp extends LitElement {
     this._pageResults = new Map();
     this._localizeDrafts = new Map();
     const mode = this._publishMode;
+    this._pageBusyMsg = `Translating ${ctx.ref} → ${ctx.locales.length} market(s)…`;
     try {
       const source = await ctx.store.readPageHtml(ctx.ref);
       const dnt = await ctx.store.readDnt().catch(() => []);
@@ -1755,6 +1762,7 @@ class MeridianApp extends LitElement {
     this._bulkResults = [];
     this._pageResults = new Map();
     const mode = this._publishMode;
+    this._pageBusyMsg = `Bulk translating pages under ${folder || 'the site'}…`;
     try {
       const dnt = await ctx.store.readDnt().catch(() => []);
       // Read each page's source ONCE (not once per locale).
@@ -1835,6 +1843,7 @@ class MeridianApp extends LitElement {
     this._pageResults = new Map();
     this._localizeDrafts = new Map();
     try {
+      this._pageBusyMsg = `Preparing ${ctx.ref} for ${ctx.locales.length} market(s)…`;
       this._localizeSource = await ctx.store.readPageHtml(ctx.ref);
       this._localizeRef = ctx.ref;
       // Bind the draft to the exact store + base org/site it was staged against,
@@ -1927,6 +1936,7 @@ class MeridianApp extends LitElement {
           return val && val !== suggestions.get(src) && val !== machine;
         }),
       );
+      this._pageBusyMsg = `Publishing ${locale}…`;
       const localizedHtml = applyLocalization(this._localizeSource, draft.dict, authored);
       await store.writeLocalizedPage(locale, this._localizeRef, localizedHtml, mode);
       const pub = await store.publishLocalizedPage(locale, this._localizeRef, mode);
@@ -1992,7 +2002,7 @@ class MeridianApp extends LitElement {
               @click=${() => this.copyLink(r.liveUrl)}><span aria-hidden="true">⧉</span> Copy link</button>
             ${r.path ? html`
               <a class="mrd-page-link" href=${this.daEditUrl(r.path)}
-                target="_blank" rel="noopener">Edit in DA ↗</a>` : nothing}
+                target="_blank" rel="noopener">Edit in EW ↗</a>` : nothing}
             ${r.mode === 'sandbox' && r.ref && !r.promoted ? html`
               <sl-button ?disabled=${this._pageBusy}
                 title="Publish this reviewed page to the live /${locale}/ URL"
@@ -2180,6 +2190,11 @@ class MeridianApp extends LitElement {
         <strong>Translate</strong> = language only (machine). <strong>Localize</strong> = language +
         market copy &amp; compliance you author. Localize includes translation.
       </p>
+      ${this._pageBusy ? html`
+        <div class="mrd-busy" role="status" aria-live="polite">
+          <span class="mrd-spinner" aria-hidden="true"></span>
+          <span>${this._pageBusyMsg || 'Working…'}</span>
+        </div>` : nothing}
       ${this._bulkResults.length ? html`
         <div class="mrd-section-label">Bulk translate — ${this._bulkResults.length} page × market</div>
         <div class="mrd-matrix-wrap">
@@ -2287,6 +2302,15 @@ class MeridianApp extends LitElement {
     this._tab = 'pages';
   }
 
+  // The edge URL of a localized page for a dashboard cell: the live locale URL
+  // when promoted, or the sandbox preview URL when only staged. Routes to the
+  // market's target site (multi-site).
+  localizedEdgeUrl(ref, locale, stage) {
+    const site = this.siteForLocale(locale);
+    const rel = stage === 'live' ? `/${locale}/${ref}` : `/meridian/live/${locale}/${ref}`;
+    return `https://main--${site}--${this._org}.aem.live${rel}`;
+  }
+
   renderOverview() {
     if (this._matrix === null) {
       if (!this._matrixBusy) this.loadMatrix();
@@ -2333,13 +2357,26 @@ class MeridianApp extends LitElement {
                 </th>
                 ${row.cells.map((c) => {
     const d = cellDisplay(c);
-    return html`
+    // A localized cell deep-links to the real page (live URL if promoted, sandbox
+    // preview URL if staged). An empty cell jumps into Localize to create it.
+    if (c.stage === 'none') {
+      return html`
                   <td>
                     <button class="mrd-matrix-cell"
                       @click=${() => this.localizeFromMatrix(row.ref, c.locale)}
-                      title=${`${row.ref} → ${c.locale} · ${d.tip}`}>
+                      title=${`Localize ${row.ref} → ${c.locale}`}>
                       <span class="mrd-risk-chip mrd-risk-${d.cls}">${d.label}</span>
                     </button>
+                  </td>`;
+    }
+    return html`
+                  <td>
+                    <a class="mrd-matrix-cell"
+                      href=${this.localizedEdgeUrl(row.ref, c.locale, c.stage)}
+                      target="_blank" rel="noopener"
+                      title=${`Open ${c.stage === 'live' ? 'live' : 'sandbox preview'} — ${c.locale} · ${d.tip}`}>
+                      <span class="mrd-risk-chip mrd-risk-${d.cls}">${d.label}</span>
+                    </a>
                   </td>`;
   })}
               </tr>`)}
