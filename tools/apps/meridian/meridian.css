@@ -1133,6 +1133,53 @@
   font-weight: 700;
 }
 
+/* Multi-select page row: checkbox + name + inline status chips */
+.mrd-pick-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.mrd-pick-check {
+  flex: 0 0 auto;
+  cursor: pointer;
+}
+
+.mrd-pick-row .mrd-tree-page {
+  width: auto;
+  flex: 1 1 auto;
+}
+
+.mrd-pick-status {
+  flex: 0 0 auto;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  padding-right: 6px;
+}
+
+.mrd-pick-status .mrd-risk-chip {
+  font-size: 11px;
+  text-transform: uppercase;
+}
+
+/* Batch-selection action bar */
+.mrd-selbar {
+  display: flex;
+  align-items: center;
+  gap: var(--mrd-space-100);
+  margin-bottom: var(--mrd-space-200);
+  padding: 8px 12px;
+  border: 1px solid var(--mrd-accent);
+  border-radius: var(--mrd-radius-control);
+  background: var(--mrd-accent-tint, rgb(20 115 230 / 8%));
+}
+
+.mrd-selbar-count {
+  font-weight: 700;
+  margin-right: auto;
+}
+
 .mrd-tree-note {
   padding: 4px 8px;
   font-size: 13px;

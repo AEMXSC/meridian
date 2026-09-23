@@ -178,6 +178,8 @@ class MeridianApp extends LitElement {
     _matrixBusy: { state: true },
     _allPages: { state: true },
     _treeQuery: { state: true },
+    _selectedPages: { state: true },
+    _managed: { state: true },
     _bulkResults: { state: true },
     _segEditOpen: { state: true },
     _overlayLocale: { state: true },
@@ -236,6 +238,8 @@ class MeridianApp extends LitElement {
     this._matrixBusy = false;
     this._allPages = null;
     this._treeQuery = '';
+    this._selectedPages = new Set();
+    this._managed = [];
     this._bulkResults = [];
     this._segEditOpen = new Set();
     this._overlayLocale = '';
@@ -323,6 +327,8 @@ class MeridianApp extends LitElement {
     this._pageExpanded = new Set();
     this._browseOpen = false;
     this._treeQuery = '';
+    this._selectedPages = new Set();
+    this._managed = [];
     this._pageResults = new Map();
     this._previewOpen = new Set();
     this._localizeDrafts = new Map();
@@ -361,6 +367,7 @@ class MeridianApp extends LitElement {
       if (this._canonicalId) this.loadAdaptations();
       this.loadTranslate();
       this.loadCatalog();
+      this.loadManaged();
       if (this._policies.length) this.loadEdgeStatus();
       // Present-but-malformed config: note it, but don't block the Pages flow.
       if (config && !valid) {
@@ -504,6 +511,24 @@ class MeridianApp extends LitElement {
       console.error('Failed to read DA locale config', e);
       this._catalog = null;
     }
+  }
+
+  // The managed manifest for the base site — used to show inline localization
+  // status in the page picker (which markets a page already has). Best-effort.
+  async loadManaged() {
+    try {
+      this._managed = await this.pageStore().readManaged();
+    } catch {
+      this._managed = [];
+    }
+  }
+
+  // Locale codes already localized for a page (from the manifest), with stage —
+  // used to annotate the picker so you skip done pages.
+  pageStatus(ref) {
+    return (this._managed || [])
+      .filter((e) => e.ref === ref)
+      .map((e) => ({ locale: e.locale, stage: e.mode === 'locale-root' ? 'live' : 'staged' }));
   }
 
   // Real edge state per market (publish-state), fetched best-effort with bounded
@@ -1295,17 +1320,7 @@ class MeridianApp extends LitElement {
     const matches = this._allPages.filter((p) => p.toLowerCase().includes(q)).slice(0, 50);
     if (!matches.length) return html`<div class="mrd-tree-note">No pages match “${this._treeQuery}”.</div>`;
     return html`<ul class="mrd-tree-list" role="group">
-      ${matches.map((ref) => html`
-        <li role="none">
-          <button class="mrd-tree-page ${ref === this._pageRef ? 'sel' : ''}" role="treeitem"
-            aria-selected=${ref === this._pageRef}
-            @click=${() => {
-    this._pageRef = ref;
-    this._browseOpen = false;
-    this._treeQuery = '';
-    this._pageRisk = [];
-  }}>${ref}</button>
-        </li>`)}
+      ${matches.map((ref) => this.renderPagePickRow(ref, ref))}
     </ul>`;
   }
 
@@ -1319,10 +1334,16 @@ class MeridianApp extends LitElement {
     this._pageExpanded = next;
   }
 
-  selectPage(node) {
-    this._pageRef = node.path.replace(/^\/+/, '').replace(/\.html$/, '');
-    this._browseOpen = false;
-    this._pageRisk = []; // status chips referred to the previous page
+  // Multi-select: toggle a page ref in the batch selection (checkboxes).
+  toggleSelectPage(ref) {
+    const next = new Set(this._selectedPages);
+    if (next.has(ref)) next.delete(ref);
+    else next.add(ref);
+    this._selectedPages = next;
+  }
+
+  clearSelection() {
+    this._selectedPages = new Set();
   }
 
   toggleLocale(code) {
@@ -1757,12 +1778,18 @@ class MeridianApp extends LitElement {
       .filter((p) => (folder ? p === ctx.ref || p.startsWith(`${folder}/`) : true))
       .slice(0, 25);
     if (!pages.length) { this._pageError = 'No pages found to bulk-translate.'; return; }
+    await this.runBulkTranslate(ctx, pages, `under ${folder || 'the site'}`);
+  }
+
+  // Batch translate + publish a set of pages × the chosen markets (fast path,
+  // language layer only). Shared by "Translate folder" and "Translate selected".
+  async runBulkTranslate(ctx, pages, label) {
     this._pageBusy = true;
     this._pageError = '';
     this._bulkResults = [];
     this._pageResults = new Map();
     const mode = this._publishMode;
-    this._pageBusyMsg = `Bulk translating pages under ${folder || 'the site'}…`;
+    this._pageBusyMsg = `Translating ${pages.length} page(s) × ${ctx.locales.length} market(s)…`;
     try {
       const dnt = await ctx.store.readDnt().catch(() => []);
       // Read each page's source ONCE (not once per locale).
@@ -1824,12 +1851,32 @@ class MeridianApp extends LitElement {
       const ok = this._bulkResults.filter((r) => r.ok).length;
       await this.saveManagedGrouped(this._bulkResults
         .filter((r) => r.ok).map((r) => ({ ref: r.ref, locale: r.locale, mode })));
-      this.showToast(`Bulk translated ${ok}/${this._bulkResults.length} page × market under ${folder || 'site'}`);
+      this.showToast(`Translated ${ok}/${this._bulkResults.length} page × market ${label || ''}`.trim());
     } catch (e) {
       this._pageError = e.message;
     } finally {
       this._pageBusy = false;
     }
+  }
+
+  // Translate every checked page in one batch (multi-select), across the chosen
+  // markets. Localize stays single-page (it needs per-page human authoring).
+  async translateSelected() {
+    if (this.guardPendingDrafts()) return;
+    if (!this._org || !this._site) { this._pageError = 'Set org/site first.'; return; }
+    const pages = [...this._selectedPages].slice(0, 50);
+    if (!pages.length) { this._pageError = 'Select at least one page (check the boxes).'; return; }
+    const locales = [...this._localeSel];
+    if (!locales.length) { this._pageError = 'Pick at least one target market.'; return; }
+    const cfg = this._config || {};
+    const ctx = {
+      locales,
+      store: this.pageStore(),
+      translate: createTranslator(daFetch, {
+        org: this._org, site: this._site, formality: cfg.formality, glossaries: cfg.glossaries,
+      }),
+    };
+    await this.runBulkTranslate(ctx, pages, `${pages.length} selected page(s)`);
   }
 
   // LOCALIZE step 1: translate the language layer, then stage the withheld
@@ -2136,11 +2183,31 @@ class MeridianApp extends LitElement {
         </li>`;
     }
     const ref = node.path.replace(/^\/+/, '').replace(/\.html$/, '');
+    return this.renderPagePickRow(ref, node.name.replace(/\.html$/, ''));
+  }
+
+  // One selectable page: a checkbox (adds to the batch selection) + the name
+  // (single-select for per-page actions) + inline status chips showing which
+  // markets it already has (so you can skip done pages).
+  renderPagePickRow(ref, displayName) {
+    const checked = this._selectedPages.has(ref);
     const sel = ref === this._pageRef;
+    const status = this.pageStatus(ref);
     return html`
-      <li role="none">
+      <li role="none" class="mrd-pick-row">
+        <input type="checkbox" class="mrd-pick-check" ?checked=${checked}
+          aria-label="Select ${ref} for batch translate"
+          @change=${() => this.toggleSelectPage(ref)} />
         <button class="mrd-tree-page ${sel ? 'sel' : ''}" role="treeitem" aria-selected=${sel}
-          @click=${() => this.selectPage(node)}>${node.name.replace(/\.html$/, '')}</button>
+          @click=${() => {
+    this._pageRef = ref;
+    this._browseOpen = false;
+    this._treeQuery = '';
+    this._pageRisk = [];
+  }}>${displayName}</button>
+        ${status.length ? html`<span class="mrd-pick-status">${status.map((s) => html`
+          <span class="mrd-risk-chip mrd-risk-${s.stage === 'live' ? 'current' : 'staged'}"
+            title="${s.locale}: ${s.stage}">${s.locale}</span>`)}</span>` : nothing}
       </li>`;
   }
 
@@ -2176,6 +2243,14 @@ class MeridianApp extends LitElement {
             aria-label="Search pages" .value=${this._treeQuery}
             @input=${(e) => { this._treeQuery = e.target.value; }} />
           ${this._treeQuery.trim() ? this.renderTreeSearch() : this.renderTreeLevel('')}
+        </div>` : nothing}
+      ${this._selectedPages.size ? html`
+        <div class="mrd-selbar" role="group" aria-label="Selected pages">
+          <span class="mrd-selbar-count">${this._selectedPages.size} page(s) selected</span>
+          <sl-button ?disabled=${this._pageBusy}
+            @click=${() => this.translateSelected()}>Translate &amp; publish selected</sl-button>
+          <sl-button class="primary outline" ?disabled=${this._pageBusy}
+            @click=${() => this.clearSelection()}>Clear selection</sl-button>
         </div>` : nothing}
       <div class="mrd-page-actions">
         <sl-button class="primary outline" ?disabled=${this._pageBusy}
