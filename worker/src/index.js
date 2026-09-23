@@ -232,12 +232,24 @@ async function translateLibre(strings, from, to, env) {
   return strings.map((s, i) => (Array.isArray(out) ? out[i] : out) ?? s);
 }
 
-async function translateDeepL(strings, to, key) {
+// DeepL host is inferred from the key suffix (:fx == free tier).
+function deeplHost(key) {
+  return key.endsWith(':fx') ? 'https://api-free.deepl.com' : 'https://api.deepl.com';
+}
+
+async function translateDeepL(strings, to, key, opts = {}) {
+  const { from, formality, glossaryId } = opts;
   const params = new URLSearchParams();
   strings.forEach((s) => params.append('text', s));
   params.set('target_lang', to.split('-')[0].toUpperCase());
-  const host = key.endsWith(':fx') ? 'https://api-free.deepl.com' : 'https://api.deepl.com';
-  const r = await fetch(`${host}/v2/translate`, {
+  // A glossary is language-pair specific and DeepL requires source_lang with it;
+  // set source_lang whenever we know it so glossary + better context apply.
+  if (from) params.set('source_lang', from.split('-')[0].toUpperCase());
+  // Brand tone per market: 'more'/'less' (or 'prefer_*' for langs without T-V).
+  if (formality) params.set('formality', formality);
+  // Forced terminology (brand/legal) via a pre-built DeepL glossary.
+  if (glossaryId) params.set('glossary_id', glossaryId);
+  const r = await fetch(`${deeplHost(key)}/v2/translate`, {
     method: 'POST',
     headers: { Authorization: `DeepL-Auth-Key ${key}`, 'content-type': 'application/x-www-form-urlencoded' },
     body: params,
@@ -245,6 +257,29 @@ async function translateDeepL(strings, to, key) {
   if (!r.ok) throw new Error(`DeepL failed (${r.status})`);
   const data = await r.json();
   return (data?.translations || []).map((t, i) => t?.text ?? strings[i]);
+}
+
+// Microsoft / Azure AI Translator — a keyed, synchronous provider (proves the
+// seam accepts a second enterprise engine). Region is optional for the global
+// endpoint; set MS_TRANSLATOR_REGION for a regional resource.
+async function translateMicrosoft(strings, from, to, key, region) {
+  const src = from ? from.split('-')[0] : '';
+  const params = new URLSearchParams({ 'api-version': '3.0', to: to.split('-')[0] });
+  if (src) params.set('from', src);
+  const headers = {
+    'Ocp-Apim-Subscription-Key': key,
+    'content-type': 'application/json',
+  };
+  if (region) headers['Ocp-Apim-Subscription-Region'] = region;
+  const r = await fetch(`https://api.cognitive.microsofttranslator.com/translate?${params}`, {
+    method: 'POST',
+    headers,
+    body: JSON.stringify(strings.map((text) => ({ text }))),
+  });
+  if (!r.ok) throw new Error(`Microsoft Translator failed (${r.status})`);
+  const data = await r.json();
+  // Response: [{ translations: [{ text, to }] }, ...] aligned to input order.
+  return strings.map((s, i) => data?.[i]?.translations?.[0]?.text ?? s);
 }
 
 // The /translate route does not forward the token to DA (it calls an MT
@@ -262,9 +297,49 @@ async function daAuthorized(token, org, site) {
   }
 }
 
+// Resolve which provider to run and translate. Returns { translations, used } or
+// throws a { httpError } sentinel for a client-facing 400. Auto order:
+// DeepL -> Google -> Microsoft -> LibreTranslate -> MyMemory (keyless).
+async function runProvider(payload, env) {
+  const {
+    strings, from = 'en', to, provider = 'auto', formality, glossaryId,
+  } = payload;
+  const e = env || {};
+  const msKey = e.MS_TRANSLATOR_KEY;
+  const registry = {
+    deepl: {
+      ok: () => !!e.DEEPL_KEY,
+      go: () => translateDeepL(strings, to, e.DEEPL_KEY, { from, formality, glossaryId }),
+    },
+    google: {
+      ok: () => !!e.GOOGLE_API_KEY,
+      go: () => translateGoogleV2(strings, from, to, e.GOOGLE_API_KEY),
+    },
+    microsoft: {
+      ok: () => !!msKey,
+      go: () => translateMicrosoft(strings, from, to, msKey, e.MS_TRANSLATOR_REGION),
+    },
+    libre: {
+      ok: () => !!e.LIBRETRANSLATE_URL,
+      go: () => translateLibre(strings, from, to, env),
+    },
+    free: { ok: () => true, go: () => translateFree(strings, from, to) },
+  };
+  // Explicit provider must be configured; 'auto' picks the first configured one
+  // in preference order (DeepL -> Google -> Microsoft -> Libre -> free).
+  if (provider !== 'auto' && registry[provider]) {
+    if (!registry[provider].ok()) {
+      throw Object.assign(new Error(`${provider} provider is not configured`), { httpError: 400 });
+    }
+    return { translations: await registry[provider].go(), used: provider };
+  }
+  const used = ['deepl', 'google', 'microsoft', 'libre', 'free'].find((n) => registry[n].ok());
+  return { translations: await registry[used].go(), used };
+}
+
 async function handleTranslate(payload, request, env) {
   const {
-    strings, from = 'en', to, org, site, provider = 'auto',
+    strings, from = 'en', to, org, site,
   } = payload || {};
   if (!Array.isArray(strings) || !strings.length) return json({ error: 'strings[] required' }, 400, request);
   if (!to || typeof to !== 'string') return json({ error: 'target locale (to) required' }, 400, request);
@@ -274,46 +349,52 @@ async function handleTranslate(payload, request, env) {
   if (!(await daAuthorized(request.headers.get('Authorization'), org, site))) {
     return json({ error: 'Unauthorized: a valid DA token with access to org/site is required' }, 401, request);
   }
-  // Explicit provider overrides the fallback chain; 'auto' (or omitted/unknown)
-  // keeps the existing DeepL -> Google -> free order. `used` reports what ran.
-  let translations;
-  let used;
-  if (provider === 'deepl') {
-    if (!env?.DEEPL_KEY) {
-      return json({ error: 'deepl provider requires DEEPL_KEY' }, 400, request);
-    }
-    translations = await translateDeepL(strings, to, env.DEEPL_KEY);
-    used = 'deepl';
-  } else if (provider === 'google') {
-    if (!env?.GOOGLE_API_KEY) {
-      return json({ error: 'google provider requires GOOGLE_API_KEY' }, 400, request);
-    }
-    translations = await translateGoogleV2(strings, from, to, env.GOOGLE_API_KEY);
-    used = 'google';
-  } else if (provider === 'libre') {
-    if (!env?.LIBRETRANSLATE_URL) {
-      return json({ error: 'libre provider requires LIBRETRANSLATE_URL' }, 400, request);
-    }
-    translations = await translateLibre(strings, from, to, env);
-    used = 'libre';
-  } else if (provider === 'free') {
-    translations = await translateFree(strings, from, to);
-    used = 'free';
-  } else if (env?.DEEPL_KEY) {
-    translations = await translateDeepL(strings, to, env.DEEPL_KEY);
-    used = 'deepl';
-  } else if (env?.GOOGLE_API_KEY) {
-    translations = await translateGoogleV2(strings, from, to, env.GOOGLE_API_KEY);
-    used = 'google';
-  } else if (env?.LIBRETRANSLATE_URL) {
-    translations = await translateLibre(strings, from, to, env);
-    used = 'libre';
-  } else {
-    translations = await translateFree(strings, from, to);
-    used = 'free';
+  try {
+    const { translations, used } = await runProvider(payload || {}, env);
+    return json({
+      from, to, provider: used, translations,
+    }, 200, request);
+  } catch (e) {
+    if (e.httpError) return json({ error: e.message }, e.httpError, request);
+    throw e;
   }
+}
+
+// Create a DeepL glossary from brand/terminology entries and return its id (to
+// store in config.glossaries as "<source>:<target>"). Entries force consistent
+// terminology per language pair — the answer to "a TMS does terminology".
+async function handleGlossary(payload, request, env) {
+  const {
+    name, source, target, entries, org, site,
+  } = payload || {};
+  if (!env?.DEEPL_KEY) return json({ error: 'glossaries require DEEPL_KEY' }, 400, request);
+  if (!source || !target) return json({ error: 'source and target languages required' }, 400, request);
+  const pairs = Array.isArray(entries) ? entries : Object.entries(entries || {});
+  const clean = pairs
+    .filter((p) => Array.isArray(p) && p[0] && p[1])
+    .map(([s, t]) => [String(s).trim(), String(t).trim()])
+    .filter(([s, t]) => s && t && !s.includes('\t') && !t.includes('\t'));
+  if (!clean.length) return json({ error: 'at least one { source: target } entry required' }, 400, request);
+  if (clean.length > 5000) return json({ error: 'too many entries (max 5000)' }, 400, request);
+  if (!(await daAuthorized(request.headers.get('Authorization'), org, site))) {
+    return json({ error: 'Unauthorized: a valid DA token with access to org/site is required' }, 401, request);
+  }
+  const params = new URLSearchParams({
+    name: name || `meridian-${source}-${target}`,
+    source_lang: source.split('-')[0].toUpperCase(),
+    target_lang: target.split('-')[0].toUpperCase(),
+    entries_format: 'tsv',
+    entries: clean.map(([s, t]) => `${s}\t${t}`).join('\n'),
+  });
+  const r = await fetch(`${deeplHost(env.DEEPL_KEY)}/v2/glossaries`, {
+    method: 'POST',
+    headers: { Authorization: `DeepL-Auth-Key ${env.DEEPL_KEY}`, 'content-type': 'application/x-www-form-urlencoded' },
+    body: params,
+  });
+  if (!r.ok) return json({ error: `DeepL glossary create failed (${r.status})` }, 502, request);
+  const data = await r.json();
   return json({
-    from, to, provider: used, translations,
+    glossaryId: data.glossary_id, source, target, entryCount: data.entry_count ?? clean.length,
   }, 200, request);
 }
 
@@ -338,6 +419,9 @@ export default {
       }
       if (request.method === 'POST' && url.pathname === '/translate') {
         return await handleTranslate(await request.json(), request, env);
+      }
+      if (request.method === 'POST' && url.pathname === '/glossary') {
+        return await handleGlossary(await request.json(), request, env);
       }
       return json({ error: 'Not found' }, 404, request);
     } catch (e) {

@@ -1124,7 +1124,16 @@ class MeridianApp extends LitElement {
     if (!ref) return { error: 'Choose a page to localize.' };
     if (!locales.length) return { error: 'Pick at least one target language.' };
     const store = this.pageStore();
-    const translate = createTranslator(daFetch, { org: this._org, site: this._site });
+    // Optional quality controls from /meridian/config.json: a formality hint and
+    // a per-language-pair glossary map (brand/legal terminology). Only DeepL
+    // honors these; other providers ignore them harmlessly.
+    const cfg = this._config || {};
+    const translate = createTranslator(daFetch, {
+      org: this._org,
+      site: this._site,
+      formality: cfg.formality,
+      glossaries: cfg.glossaries,
+    });
     return {
       ref, locales, store, translate,
     };

@@ -77,12 +77,28 @@ Two ways to stand that up:
 The language layer is produced by a real machine-translation provider, proxied
 through the Meridian worker so keys stay server-side (and browser CORS is a
 non-issue). The worker's `/translate` endpoint resolves a provider in this order,
-and a caller may force one via a `provider` field (`deepl` | `google` | `free` |
-`auto`):
+and a caller may force one via a `provider` field (`deepl` | `google` |
+`microsoft` | `libre` | `free` | `auto`):
 
 1. **DeepL** — set `wrangler secret put DEEPL_KEY` (recommended; free tier available).
 2. **Google Cloud Translation** — set `GOOGLE_API_KEY`.
-3. **Keyless fallback** — used when no key is set (rate-limited; fine for a demo).
+3. **Microsoft / Azure AI Translator** — set `MS_TRANSLATOR_KEY` (and
+   `MS_TRANSLATOR_REGION` for a regional resource). A second keyed, synchronous
+   provider proving the seam accepts any enterprise engine.
+4. **LibreTranslate** — set `LIBRETRANSLATE_URL` (open-source, self-hostable, keyless).
+5. **Keyless fallback** — used when nothing is set (rate-limited; fine for a demo).
+
+### Terminology & tone (DeepL)
+
+Two quality controls, read from `/meridian/config.json` and passed through only to
+DeepL (other providers ignore them harmlessly):
+
+- **`formality`** — `more` | `less` | `prefer_more` | `prefer_less`; brand tone per
+  market.
+- **`glossaries`** — a map of `"<from>:<to>"` → DeepL glossary id, applied per
+  language pair to force brand/legal terminology. Build one from your terms with
+  the worker's `POST /glossary` (`{ source, target, entries: { term: translation } }`
+  → `{ glossaryId }`), then record it in `config.glossaries`.
 
 **Bring your own engine / TMS:** the provider is the single extension point.
 `core/translate.js` (`createTranslator`) is pluggable client-side, and the worker's

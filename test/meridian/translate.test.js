@@ -44,6 +44,33 @@ test('translate posts the target language + strings and maps an ordered array re
   assert.equal(map.get('World'), 'Mundo');
 });
 
+test('translate passes provider + formality, and picks the glossary for the pair', async () => {
+  let sent;
+  const fetchImpl = async (url, opts) => { sent = JSON.parse(opts.body); return okJson({ translations: ['Hallo'] }); };
+  const translate = createTranslator(fetchImpl, {
+    endpoint: 'https://w/translate',
+    provider: 'deepl',
+    formality: 'more',
+    glossaries: { 'en:de': 'gloss-en-de', 'en:fr': 'gloss-en-fr' },
+  });
+  await translate(['Hello'], { from: 'en', to: 'de' });
+  assert.equal(sent.provider, 'deepl');
+  assert.equal(sent.formality, 'more');
+  assert.equal(sent.glossaryId, 'gloss-en-de', 'selects the glossary matching the from:to pair');
+});
+
+test('translate omits glossaryId when no glossary matches the pair', async () => {
+  let sent;
+  const fetchImpl = async (url, opts) => { sent = JSON.parse(opts.body); return okJson({ translations: ['Ciao'] }); };
+  const translate = createTranslator(fetchImpl, {
+    endpoint: 'https://w/translate', glossaries: { 'en:de': 'gloss-en-de' },
+  });
+  await translate(['Hi'], { from: 'en', to: 'it' });
+  assert.equal('glossaryId' in sent, false);
+  assert.equal('formality' in sent, false);
+  assert.equal('provider' in sent, false);
+});
+
 test('translate de-duplicates the request and skips blank strings', async () => {
   let sent;
   const fetchImpl = async (url, opts) => {

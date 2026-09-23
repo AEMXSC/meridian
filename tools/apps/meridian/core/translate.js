@@ -63,28 +63,44 @@ function toMap(sources, data) {
   return map;
 }
 
-// createTranslator(fetchImpl, { endpoint }) -> translate(strings, { from, to })
+// createTranslator(fetchImpl, opts) -> translate(strings, { from, to })
 //   -> Promise<Map<sourceString, translatedString>>
 // `fetchImpl` is injectable for tests; in the browser it defaults to global fetch.
+// opts: { endpoint, org, site, provider, formality, glossaries }
+//   - provider   force a worker provider (deepl|google|microsoft|libre|free|auto)
+//   - formality  DeepL formality hint (more|less|prefer_more|prefer_less)
+//   - glossaries map of "<from>:<to>" -> DeepL glossary id, picked per pair
 export function createTranslator(fetchImpl, opts = {}) {
   const endpoint = opts.endpoint || DEFAULT_ENDPOINT;
-  const { org, site } = opts;
+  const {
+    org, site, provider, formality, glossaries,
+  } = opts;
   const doFetch = fetchImpl || (typeof fetch !== 'undefined' ? fetch : null);
 
   return async function translate(strings, { from = 'en', to } = {}) {
     const target = localeToLang(to);
     if (!target) throw new Error('translate requires a target locale');
+    const src = localeToLang(from) || 'en';
     const unique = [...new Set((strings || []).filter((s) => s && s.trim()))];
     if (!unique.length) return new Map();
     if (!doFetch) throw new Error('no fetch implementation available for translation');
 
+    // Glossaries are language-pair specific; pick the one matching this pair.
+    const glossaryId = glossaries?.[`${src}:${target}`];
     const resp = await doFetch(endpoint, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       // org/site let the worker verify the caller has DA access (it does not
       // forward the token to DA itself for translation).
       body: JSON.stringify({
-        from: localeToLang(from) || 'en', to: target, strings: unique, org, site,
+        from: src,
+        to: target,
+        strings: unique,
+        org,
+        site,
+        ...(provider ? { provider } : {}),
+        ...(formality ? { formality } : {}),
+        ...(glossaryId ? { glossaryId } : {}),
       }),
     });
     if (!resp.ok) {
