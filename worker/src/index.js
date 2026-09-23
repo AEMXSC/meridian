@@ -45,14 +45,17 @@ function corsHeaders(request) {
     'Access-Control-Allow-Origin': allowOrigin(origin) ? origin : 'https://da.live',
     'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
     'Access-Control-Allow-Headers': 'Authorization, Content-Type',
+    // So the browser client can read the real error message cross-origin.
+    'Access-Control-Expose-Headers': 'x-error',
   };
 }
 
 function json(body, status, request) {
-  return new Response(JSON.stringify(body), {
-    status,
-    headers: { 'Content-Type': 'application/json', ...corsHeaders(request) },
-  });
+  const headers = { 'Content-Type': 'application/json', ...corsHeaders(request) };
+  // Mirror an error into a readable header (a single header line, capped) so the
+  // app surfaces the real reason instead of a bare "HTTP <status>".
+  if (body && body.error) headers['x-error'] = String(body.error).replace(/\s+/g, ' ').slice(0, 300);
+  return new Response(JSON.stringify(body), { status, headers });
 }
 
 function assertLocale(locale) {
@@ -237,10 +240,11 @@ function deeplHost(key) {
   return key.endsWith(':fx') ? 'https://api-free.deepl.com' : 'https://api.deepl.com';
 }
 
-async function translateDeepL(strings, to, key, opts = {}) {
+// One DeepL request for up to DEEPL_MAX texts.
+async function deeplBatch(batch, to, key, opts) {
   const { from, formality, glossaryId } = opts;
   const params = new URLSearchParams();
-  strings.forEach((s) => params.append('text', s));
+  batch.forEach((s) => params.append('text', s));
   params.set('target_lang', to.split('-')[0].toUpperCase());
   // A glossary is language-pair specific and DeepL requires source_lang with it;
   // set source_lang whenever we know it so glossary + better context apply.
@@ -256,7 +260,20 @@ async function translateDeepL(strings, to, key, opts = {}) {
   });
   if (!r.ok) throw new Error(`DeepL failed (${r.status})`);
   const data = await r.json();
-  return (data?.translations || []).map((t, i) => t?.text ?? strings[i]);
+  return (data?.translations || []).map((t, i) => t?.text ?? batch[i]);
+}
+
+// DeepL accepts at most 50 text params per request, so chunk larger batches
+// (a page can easily exceed 50 segments) and preserve order.
+const DEEPL_MAX = 50;
+async function translateDeepL(strings, to, key, opts = {}) {
+  const out = [];
+  for (let i = 0; i < strings.length; i += DEEPL_MAX) {
+    // eslint-disable-next-line no-await-in-loop -- keep DeepL requests sequential
+    const part = await deeplBatch(strings.slice(i, i + DEEPL_MAX), to, key, opts);
+    out.push(...part);
+  }
+  return out;
 }
 
 // Microsoft / Azure AI Translator — a keyed, synchronous provider (proves the
@@ -429,7 +446,11 @@ export default {
       }
       return json({ error: 'Not found' }, 404, request);
     } catch (e) {
-      return json({ error: e.message }, 500, request);
+      // Surface the real reason (visible in `wrangler tail`) and pass a concise
+      // message to the client rather than a bare 500.
+      // eslint-disable-next-line no-console
+      console.error('worker error', url.pathname, e && e.stack ? e.stack : e);
+      return json({ error: `worker error: ${e && e.message ? e.message : e}` }, 500, request);
     }
   },
 };
