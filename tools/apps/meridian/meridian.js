@@ -2256,106 +2256,118 @@ class MeridianApp extends LitElement {
   }
 
   renderPages() {
+    // The comparison/result is the payoff — it lives in the right-hand canvas so
+    // it's always on screen next to the controls (TMS workbench pattern), instead
+    // of stacked below a full-height page tree.
+    const hasCanvas = this._pageBusy || this._bulkResults.length || this._pageRisk.length
+      || this._pageError || this._localizeDrafts.size || this._pageResults.size;
     return html`
-      <p class="mrd-adapt-intro">
-        Localize a real page from this site. <strong>Translate</strong> does the language layer
-        automatically (machine). <strong>Localize</strong> also lets you author the market-specific
-        commercial &amp; compliance segments before publishing — the difference between a
-        <em>translated</em> page and a <em>localized</em> one.
-      </p>
-      ${this._publishMode === 'locale-root' ? html`
-        <div class="mrd-entry-meta mrd-mode-note">
-          <strong>Direct publish is on</strong> (configured): pages go straight to real locale URLs
-          (e.g. <code>/fr/${this._pageRef || 'page'}</code>), skipping the sandbox review step. Existing
-          non-Meridian pages are still protected.
-        </div>` : nothing}
-      <div class="mrd-page-form">
-        <label id="mrd-page-lbl">Page</label>
-        <button class="mrd-page-pick" aria-labelledby="mrd-page-lbl" aria-haspopup="tree"
-          aria-expanded=${this._browseOpen} ?disabled=${this._pageBusy}
-          @click=${() => this.toggleBrowse()}>
-          ${this._pageRef || 'Choose a page…'} <span class="mrd-tree-caret" aria-hidden="true">▾</span>
-        </button>
-        <label id="mrd-lang-lbl">Markets</label>
-        <span class="mrd-lang-chips" role="group" aria-labelledby="mrd-lang-lbl">
-          ${this.renderLangChips()}
-        </span>
-      </div>
-      ${this._browseOpen ? html`
-        <div class="mrd-tree" role="tree" aria-label="Site pages">
-          <input class="mrd-tree-search" type="search" placeholder="Search pages…"
-            aria-label="Search pages" .value=${this._treeQuery}
-            @input=${(e) => { this._treeQuery = e.target.value; }} />
-          ${this._treeQuery.trim() ? this.renderTreeSearch() : this.renderTreeLevel('')}
-        </div>` : nothing}
-      ${this._selectedPages.size ? html`
-        <div class="mrd-selbar" role="group" aria-label="Selected pages">
-          <span class="mrd-selbar-count">${this._selectedPages.size} page(s) selected</span>
-          <sl-button ?disabled=${this._pageBusy}
-            @click=${() => this.translateSelected()}>Translate &amp; publish selected</sl-button>
-          <sl-button class="primary outline" ?disabled=${this._pageBusy}
-            @click=${() => this.clearSelection()}>Clear selection</sl-button>
-        </div>` : nothing}
-      <div class="mrd-page-actions">
-        <sl-button class="primary outline" ?disabled=${this._pageBusy}
-          @click=${() => this.translatePages()}>Translate &amp; publish</sl-button>
-        <sl-button ?disabled=${this._pageBusy} @click=${() => this.startLocalize()}>Localize</sl-button>
-        <sl-button class="primary outline" ?disabled=${this._pageBusy}
-          @click=${() => this.translateFolder()}>Translate folder</sl-button>
-        <sl-button class="primary outline" ?disabled=${this._pageBusy}
-          @click=${() => this.checkStatus()}>Check status</sl-button>
-      </div>
-      <p class="mrd-action-help">
-        <strong>Translate</strong> = language only (machine). <strong>Localize</strong> = language +
-        market copy &amp; compliance you author. Localize includes translation.
-      </p>
-      ${this._pageBusy ? html`
-        <div class="mrd-busy" role="status" aria-live="polite">
-          <span class="mrd-spinner" aria-hidden="true"></span>
-          <span>${this._pageBusyMsg || 'Working…'}</span>
-        </div>` : nothing}
-      ${this._bulkResults.length ? html`
-        <div class="mrd-section-label">Bulk translate — ${this._bulkResults.length} page × market</div>
-        <div class="mrd-matrix-wrap">
-          <table class="mrd-matrix">
-            <thead>
-              <tr><th scope="col">Page</th><th scope="col">Market</th><th scope="col">Result</th><th></th></tr>
-            </thead>
-            <tbody>
-              ${this._bulkResults.map((r) => html`
-                <tr>
-                  <td>${r.ref}</td>
-                  <td>${r.locale}</td>
-                  <td>${r.ok
+      <div class="mrd-workbench">
+        <aside class="mrd-rail" aria-label="Page and market controls">
+          ${this._publishMode === 'locale-root' ? html`
+            <div class="mrd-entry-meta mrd-mode-note">
+              <strong>Direct publish is on</strong> (configured): pages go straight to real locale
+              URLs (e.g. <code>/fr/${this._pageRef || 'page'}</code>), skipping the sandbox review
+              step. Existing non-Meridian pages are still protected.
+            </div>` : nothing}
+          <div class="mrd-page-form">
+            <label id="mrd-page-lbl">Page</label>
+            <button class="mrd-page-pick" aria-labelledby="mrd-page-lbl" aria-haspopup="tree"
+              aria-expanded=${this._browseOpen} ?disabled=${this._pageBusy}
+              @click=${() => this.toggleBrowse()}>
+              ${this._pageRef || 'Choose a page…'} <span class="mrd-tree-caret" aria-hidden="true">▾</span>
+            </button>
+            <label id="mrd-lang-lbl">Markets</label>
+            <span class="mrd-lang-chips" role="group" aria-labelledby="mrd-lang-lbl">
+              ${this.renderLangChips()}
+            </span>
+          </div>
+          ${this._browseOpen ? html`
+            <div class="mrd-tree" role="tree" aria-label="Site pages">
+              <input class="mrd-tree-search" type="search" placeholder="Search pages…"
+                aria-label="Search pages" .value=${this._treeQuery}
+                @input=${(e) => { this._treeQuery = e.target.value; }} />
+              ${this._treeQuery.trim() ? this.renderTreeSearch() : this.renderTreeLevel('')}
+            </div>` : nothing}
+          ${this._selectedPages.size ? html`
+            <div class="mrd-selbar" role="group" aria-label="Selected pages">
+              <span class="mrd-selbar-count">${this._selectedPages.size} page(s) selected</span>
+              <sl-button ?disabled=${this._pageBusy}
+                @click=${() => this.translateSelected()}>Translate &amp; publish selected</sl-button>
+              <sl-button class="primary outline" ?disabled=${this._pageBusy}
+                @click=${() => this.clearSelection()}>Clear selection</sl-button>
+            </div>` : nothing}
+          <div class="mrd-page-actions">
+            <sl-button class="primary outline" ?disabled=${this._pageBusy}
+              @click=${() => this.translatePages()}>Translate &amp; publish</sl-button>
+            <sl-button ?disabled=${this._pageBusy} @click=${() => this.startLocalize()}>Localize</sl-button>
+            <sl-button class="primary outline" ?disabled=${this._pageBusy}
+              @click=${() => this.translateFolder()}>Translate folder</sl-button>
+            <sl-button class="primary outline" ?disabled=${this._pageBusy}
+              @click=${() => this.checkStatus()}>Check status</sl-button>
+          </div>
+          <p class="mrd-action-help">
+            <strong>Translate</strong> = language only (machine). <strong>Localize</strong> = language
+            + market copy &amp; compliance you author (includes translation).
+          </p>
+        </aside>
+        <section class="mrd-canvas" aria-label="Comparison and results">
+          ${this._pageBusy ? html`
+            <div class="mrd-busy" role="status" aria-live="polite">
+              <span class="mrd-spinner" aria-hidden="true"></span>
+              <span>${this._pageBusyMsg || 'Working…'}</span>
+            </div>` : nothing}
+          ${this._bulkResults.length ? html`
+            <div class="mrd-section-label">Bulk translate — ${this._bulkResults.length} page × market</div>
+            <div class="mrd-matrix-wrap">
+              <table class="mrd-matrix">
+                <thead>
+                  <tr><th scope="col">Page</th><th scope="col">Market</th><th scope="col">Result</th><th></th></tr>
+                </thead>
+                <tbody>
+                  ${this._bulkResults.map((r) => html`
+                    <tr>
+                      <td>${r.ref}</td>
+                      <td>${r.locale}</td>
+                      <td>${r.ok
     ? html`<span class="mrd-risk-chip mrd-risk-current">${r.pct}%</span>`
     : html`<span class="mrd-risk-chip mrd-risk-stale">failed</span>`}</td>
-                  <td>${r.ok
+                      <td>${r.ok
     ? html`<a class="mrd-page-link-inline" href=${r.liveUrl} target="_blank" rel="noopener">view ↗</a>`
     : r.error}</td>
-                </tr>`)}
-            </tbody>
-          </table>
-        </div>` : nothing}
-      ${this._pageRisk.length ? html`
-        <div class="mrd-risk">
-          ${this._pageRisk.map((r) => html`
-            <span class="mrd-risk-chip mrd-risk-${r.state}" title=${RISK_TIP[r.state]}>
-              <span class="mrd-risk-locale">${r.locale}</span> ${RISK_LABEL[r.state]}
-            </span>`)}
-        </div>` : nothing}
-      ${this._pageError ? html`<div class="nx-alert warning">${this._pageError}</div>` : nothing}
-      ${this._localizeDrafts.size ? html`
-        <div class="mrd-section-label">
-          <span>Localize — author each market's commercial/compliance text, then publish per market:</span>
-          <sl-button class="primary outline mrd-clear-drafts" ?disabled=${this._pageBusy}
-            @click=${() => this.clearDrafts()}>Clear drafts</sl-button>
-        </div>
-        <div class="mrd-list">
-          ${[...this._localizeDrafts].map(([l, d]) => this.renderLocalizeDraft(l, d))}
-        </div>` : nothing}
-      ${this._pageResults.size
+                    </tr>`)}
+                </tbody>
+              </table>
+            </div>` : nothing}
+          ${this._pageRisk.length ? html`
+            <div class="mrd-risk">
+              ${this._pageRisk.map((r) => html`
+                <span class="mrd-risk-chip mrd-risk-${r.state}" title=${RISK_TIP[r.state]}>
+                  <span class="mrd-risk-locale">${r.locale}</span> ${RISK_LABEL[r.state]}
+                </span>`)}
+            </div>` : nothing}
+          ${this._pageError ? html`<div class="nx-alert warning">${this._pageError}</div>` : nothing}
+          ${this._localizeDrafts.size ? html`
+            <div class="mrd-section-label">
+              <span>Localize — author each market's commercial/compliance text, then publish per market:</span>
+              <sl-button class="primary outline mrd-clear-drafts" ?disabled=${this._pageBusy}
+                @click=${() => this.clearDrafts()}>Clear drafts</sl-button>
+            </div>
+            <div class="mrd-list">
+              ${[...this._localizeDrafts].map(([l, d]) => this.renderLocalizeDraft(l, d))}
+            </div>` : nothing}
+          ${this._pageResults.size
     ? html`<div class="mrd-list">${[...this._pageResults].map(([l, r]) => this.renderPageResult(l, r))}</div>`
     : nothing}
+          ${hasCanvas ? nothing : html`
+            <div class="mrd-canvas-empty">
+              <p>Pick a page and one or more markets, then <strong>Translate &amp; publish</strong> or
+              <strong>Localize</strong>.</p>
+              <p class="mrd-canvas-empty-sub">The source ↔ market comparison shows here, side by side,
+              ready to review and promote.</p>
+            </div>`}
+        </section>
+      </div>
     `;
   }
 

@@ -717,6 +717,58 @@
 }
 
 /* ---- Pages (real whole-page localization) --------------------------- */
+
+/* Two-pane workbench: a compact control rail on the left, the source<->market
+ * comparison on the right so the payoff is always on screen (TMS pattern).
+ * Stacks to one column on narrow viewports. */
+.mrd-workbench {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--mrd-space-300);
+}
+
+.mrd-rail {
+  flex: 0 0 320px;
+  max-width: 320px;
+  position: sticky;
+  top: var(--mrd-space-200);
+}
+
+.mrd-canvas {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+/* Placeholder shown until a translate/localize produces something. */
+.mrd-canvas-empty {
+  padding: var(--mrd-space-300);
+  border: 1px dashed var(--mrd-border);
+  border-radius: var(--mrd-radius-card);
+  background: var(--mrd-surface-sunken);
+  color: var(--mrd-text-muted);
+}
+
+.mrd-canvas-empty p {
+  margin: 0 0 var(--mrd-space-100);
+}
+
+.mrd-canvas-empty-sub {
+  font-size: 12px;
+}
+
+@media (width <= 900px) {
+  .mrd-workbench {
+    flex-direction: column;
+  }
+
+  .mrd-rail {
+    flex-basis: auto;
+    max-width: none;
+    position: static;
+    width: 100%;
+  }
+}
+
 .mrd-page-form {
   display: flex;
   flex-wrap: wrap;
@@ -917,6 +969,12 @@
   display: flex;
   gap: var(--mrd-space-100);
   margin-bottom: var(--mrd-space-100);
+}
+
+/* In the rail the four actions read best stacked full-width. */
+.mrd-rail .mrd-page-actions {
+  flex-direction: column;
+  align-items: stretch;
 }
 
 .mrd-action-help {
