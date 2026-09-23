@@ -522,6 +522,60 @@ export default class DaStore {
     };
   }
 
+  // Promote a REVIEWED sandbox page to the live locale path — byte-for-byte, no
+  // re-translation. Reads the sandbox artifact and republishes it via the
+  // locale-root path (which applies the collision guard + ownership marker), so
+  // the human-reviewed content is exactly what goes live.
+  async promotePage(locale, ref) {
+    this.#assertNotSource(locale);
+    const html = await this.#readText(localePagePath(this.#base, locale, ref, 'sandbox'));
+    if (html == null) {
+      throw new Error(`No sandbox page to promote for ${locale} — translate it in Sandbox first.`);
+    }
+    await this.writeLocalizedPage(locale, ref, html, 'locale-root');
+    return this.publishLocalizedPage(locale, ref, 'locale-root');
+  }
+
+  // ---- Promotion requests (human-in-the-loop approval before going live) -----
+
+  #promotionPath(locale, ref) {
+    assertLocale(locale);
+    return `${this.#base}/promotions/${locale}/${assertPageRef(ref)}.json`;
+  }
+
+  writePromotionRequest(record) {
+    return this.#writeJson(this.#promotionPath(record.locale, record.ref), record);
+  }
+
+  async removePromotionRequest(locale, ref) {
+    const resp = await this.#fetch(this.#sourceUrl(this.#promotionPath(locale, ref)), { method: 'DELETE' });
+    if (!resp.ok && resp.status !== 404) throw new Error(`Delete failed (${resp.status})`);
+  }
+
+  // Every pending promotion request (recursive walk of {base}/promotions). A 404
+  // means none yet; any other non-OK throws (same convention as listQueue).
+  async listPromotions() {
+    const items = [];
+    const walk = async (path) => {
+      const resp = await this.#fetch(`${DA_ORIGIN}/list/${this.#org}/${this.#site}${path}`, { cache: 'no-store' });
+      if (resp.status === 404) return;
+      if (!resp.ok) throw new Error(`Promotions list failed for ${path} (${resp.status})`);
+      const entries = await resp.json();
+      if (!Array.isArray(entries)) return;
+      await Promise.all(entries.map(async (entry) => {
+        const isFolder = !entry.ext && !entry.name.includes('.');
+        const child = `${path}/${entry.name}`;
+        if (isFolder) await walk(child);
+        else if (entry.name.endsWith('.json')) {
+          const item = await this.#readJson(child);
+          if (item) items.push(item);
+        }
+      }));
+    };
+    await walk(`${this.#base}/promotions`);
+    return items;
+  }
+
   // ---- Translation Memory ---------------------------------------------------
 
   // The locale's TM (source segment -> approved translation), or a fresh empty

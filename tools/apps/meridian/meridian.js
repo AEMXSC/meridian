@@ -127,6 +127,7 @@ class MeridianApp extends LitElement {
     _loadingDiffs: { state: true },
     _tab: { state: true },
     _queue: { state: true },
+    _promotions: { state: true },
     _queueBusy: { state: true },
     _rejectingKey: { state: true },
     _layers: { state: true },
@@ -178,6 +179,7 @@ class MeridianApp extends LitElement {
     this._error = '';
     this._tab = parseDeepLink().tab;
     this._queue = [];
+    this._promotions = [];
     this._queueBusy = new Set();
     this._rejectingKey = '';
     this._layers = new Map();
@@ -344,6 +346,12 @@ class MeridianApp extends LitElement {
     } catch (e) {
       console.error('Failed to load taste queue', e);
       this._error = `Could not load taste queue: ${e.message}`;
+    }
+    // Page-promotion requests are a separate, whole-page approval stream.
+    try {
+      this._promotions = await this._store.listPromotions();
+    } catch (e) {
+      console.error('Failed to load promotion requests', e);
     }
   }
 
@@ -840,7 +848,7 @@ class MeridianApp extends LitElement {
             @click=${() => { this._tab = 'exposure'; }}>Issues</button>
           <button role="tab" aria-selected=${this._tab === 'taste'}
             class="mrd-tab ${this._tab === 'taste' ? 'active' : ''}"
-            @click=${() => { this._tab = 'taste'; }}>Approvals${this._queue.length ? html` <span class="mrd-badge">${this._queue.length}</span>` : nothing}</button>
+            @click=${() => { this._tab = 'taste'; }}>Approvals${(this._queue.length + (this._promotions?.length || 0)) ? html` <span class="mrd-badge">${this._queue.length + (this._promotions?.length || 0)}</span>` : nothing}</button>
           <button role="tab" aria-selected=${this._tab === 'adapt'}
             class="mrd-tab ${this._tab === 'adapt' ? 'active' : ''}"
             @click=${() => { this._tab = 'adapt'; }}>Market rules</button>
@@ -957,9 +965,41 @@ class MeridianApp extends LitElement {
       </div>`;
   }
 
+  renderPromotionItem(item) {
+    const key = `promo:${item.locale}:${item.ref}`;
+    const busy = this._queueBusy.has(key);
+    return html`
+      <div class="mrd-market">
+        <div class="mrd-market-head">
+          <span class="mrd-kind mrd-warning">promote → live</span>
+          <span class="mrd-locale">${item.locale}</span>
+          <span class="mrd-detail">${item.ref}${item.requestedBy ? ` · requested by ${item.requestedBy}` : ''}</span>
+          <span class="mrd-queue-actions">
+            <sl-button ?disabled=${busy}
+              title="Promote the reviewed sandbox page to /${item.locale}/${item.ref}"
+              @click=${() => this.approvePromotion(item)}>Approve &amp; promote</sl-button>
+            <sl-button class="negative outline" ?disabled=${busy}
+              @click=${() => this.rejectPromotion(item)}>Reject</sl-button>
+          </span>
+        </div>
+      </div>`;
+  }
+
   renderTaste() {
-    if (!this._queue.length) return html`<div class="mrd-empty">Taste queue is empty.</div>`;
-    return html`<div class="mrd-list">${this._queue.map((i) => this.renderQueueItem(i))}</div>`;
+    const promos = this._promotions || [];
+    if (!this._queue.length && !promos.length) {
+      return html`<div class="mrd-empty">Nothing awaiting approval.</div>`;
+    }
+    return html`
+      ${promos.length ? html`
+        <div class="mrd-section-label">Page promotions — approve to publish the reviewed page to its live locale URL</div>
+        <div class="mrd-list">${promos.map((i) => this.renderPromotionItem(i))}</div>
+      ` : nothing}
+      ${this._queue.length ? html`
+        <div class="mrd-section-label">Variant taste queue — gated recomputes awaiting review</div>
+        <div class="mrd-list">${this._queue.map((i) => this.renderQueueItem(i))}</div>
+      ` : nothing}
+    `;
   }
 
   // Deleting a non-negotiable (compliance) entry takes a confirm step so legal
@@ -1476,6 +1516,91 @@ class MeridianApp extends LitElement {
     this._pageError = '';
   }
 
+  // Update one page-result row immutably (Lit reactivity: new Map).
+  patchResult(locale, patch) {
+    const cur = this._pageResults.get(locale);
+    if (!cur) return;
+    this._pageResults = new Map(this._pageResults).set(locale, { ...cur, ...patch });
+  }
+
+  // Promote a reviewed sandbox page straight to the live locale URL (self-review
+  // path). Routes to the market's target site; records the manifest + hreflang.
+  async promoteToLive(locale, ref) {
+    this._pageBusy = true;
+    this._pageError = '';
+    try {
+      const pub = await this.storeForSite(this.siteForLocale(locale)).promotePage(locale, ref);
+      await this.saveManagedGrouped([{ ref, locale, mode: 'locale-root' }]);
+      this.patchResult(locale, { promoted: true, liveUrl: pub.liveUrl, path: pub.path });
+      this.showToast(`Promoted ${locale} → live (${pub.path})`);
+    } catch (e) {
+      this._pageError = `Promote failed for ${locale}: ${e.message}`;
+    } finally {
+      this._pageBusy = false;
+    }
+  }
+
+  // Request approval instead of promoting directly (governed path): file a
+  // promotion request a different reviewer approves in the Approvals tab.
+  async requestPromotion(locale, ref) {
+    this._pageBusy = true;
+    this._pageError = '';
+    try {
+      await this.storeForSite(this.siteForLocale(locale)).writePromotionRequest({
+        ref,
+        locale,
+        site: this.siteForLocale(locale),
+        requestedBy: (this.context && this.context.user && this.context.user.email) || 'author',
+        at: Date.now(),
+      });
+      this.patchResult(locale, { requested: true });
+      this.showToast(`Approval requested for ${locale} — a reviewer can approve it in Approvals.`);
+      this.loadQueue();
+    } catch (e) {
+      this._pageError = `Could not request approval for ${locale}: ${e.message}`;
+    } finally {
+      this._pageBusy = false;
+    }
+  }
+
+  // Reviewer approves a promotion request → promote the reviewed page to live and
+  // clear the request. Runs under the approver's own DA session.
+  async approvePromotion(item) {
+    const key = `promo:${item.locale}:${item.ref}`;
+    this._queueBusy = new Set(this._queueBusy).add(key);
+    try {
+      const store = this.storeForSite(item.site || this.siteForLocale(item.locale));
+      await store.promotePage(item.locale, item.ref);
+      await this.saveManagedGrouped([{ ref: item.ref, locale: item.locale, mode: 'locale-root' }]);
+      await store.removePromotionRequest(item.locale, item.ref);
+      this.showToast(`Approved & promoted ${item.locale} / ${item.ref} → live`);
+      await this.loadQueue();
+    } catch (e) {
+      this._error = `Approve failed: ${e.message}`;
+    } finally {
+      const next = new Set(this._queueBusy);
+      next.delete(key);
+      this._queueBusy = next;
+    }
+  }
+
+  async rejectPromotion(item) {
+    const key = `promo:${item.locale}:${item.ref}`;
+    if (this._queueBusy.has(key)) return;
+    this._queueBusy = new Set(this._queueBusy).add(key);
+    try {
+      await this.storeForSite(item.site || this.siteForLocale(item.locale))
+        .removePromotionRequest(item.locale, item.ref);
+      await this.loadQueue();
+    } catch (e) {
+      this._error = `Reject failed: ${e.message}`;
+    } finally {
+      const next = new Set(this._queueBusy);
+      next.delete(key);
+      this._queueBusy = next;
+    }
+  }
+
   // TM is an asset/cache layer — a save failure must never fail the primary
   // translate/publish path, so persistence is best-effort and only warns.
   // eslint-disable-next-line class-methods-use-this
@@ -1565,6 +1690,8 @@ class MeridianApp extends LitElement {
             ok: true,
             kind: 'translate',
             locale,
+            ref: ctx.ref,
+            mode,
             coverage: out.coverage,
             review: out.review,
             memory: tmLeverage(tmt.stats),
@@ -1788,6 +1915,8 @@ class MeridianApp extends LitElement {
       this._pageResults = new Map(this._pageResults).set(locale, {
         ok: true,
         kind: 'localize',
+        ref: this._localizeRef,
+        mode,
         coverage: draft.coverage,
         heldTotal: draft.review.length,
         heldDone,
@@ -1842,6 +1971,14 @@ class MeridianApp extends LitElement {
             ${r.path ? html`
               <a class="mrd-page-link" href=${this.daEditUrl(r.path)}
                 target="_blank" rel="noopener">Edit in DA ↗</a>` : nothing}
+            ${r.mode === 'sandbox' && r.ref && !r.promoted ? html`
+              <button class="mrd-page-link-btn mrd-promote" ?disabled=${this._pageBusy}
+                title="Copy this reviewed page to the live /${locale}/ URL"
+                @click=${() => this.promoteToLive(locale, r.ref)}>Promote to live ↑</button>
+              <button class="mrd-page-link-btn" ?disabled=${this._pageBusy || r.requested}
+                @click=${() => this.requestPromotion(locale, r.ref)}>${r.requested ? 'Approval requested' : 'Request approval'}</button>
+            ` : nothing}
+            ${r.promoted ? html`<span class="mrd-kind mrd-positive">promoted → live</span>` : nothing}
           </span>
         </div>
         ${r.kind === 'translate' && r.review?.length ? html`

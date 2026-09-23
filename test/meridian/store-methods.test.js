@@ -108,6 +108,24 @@ test('sandbox write is namespaced and skips the collision read', async () => {
   assert.deepEqual(fetchImpl.calls.map((c) => c.method), ['PUT'], 'no pre-write GET in sandbox');
 });
 
+test('promotePage refuses the source locale before any network', async () => {
+  const s = store(async () => { throw new Error('must not touch the network'); });
+  await assert.rejects(() => s.promotePage('en', 'x'), /source locale/);
+});
+
+test('promotePage throws when there is no sandbox page to promote', async () => {
+  // GET the sandbox artifact → 404 → nothing to promote.
+  const s = store(makeFetch((url, opts) => ((opts.method || 'GET') === 'GET'
+    ? resp({ ok: false, status: 404 })
+    : resp({}))));
+  await assert.rejects(() => s.promotePage('fr', 'international-banking'), /No sandbox page to promote/);
+});
+
+test('listPromotions treats a 404 as no pending requests', async () => {
+  const s = store(makeFetch(() => resp({ ok: false, status: 404 })));
+  assert.deepEqual(await s.listPromotions(), []);
+});
+
 test('readManaged parses entries and treats a 404 as an empty manifest', async () => {
   const withDoc = store(makeFetch(() => resp({ json: { entries: [{ ref: 'a', locale: 'fr', mode: 'locale-root' }] } })));
   assert.deepEqual(await withDoc.readManaged(), [{ ref: 'a', locale: 'fr', mode: 'locale-root' }]);
