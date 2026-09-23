@@ -31,9 +31,10 @@ const BASE = '/meridian';
 const SAFE_SEGMENT = /^[a-zA-Z0-9_-]+$/;
 
 const ALLOWED_ORIGINS = new Set(['https://da.live', 'http://localhost:3000']);
-// The app also runs from its own edge iframe (…--meridian--<org>.aem.live/.page),
-// so allow any Meridian app origin in addition to the static allow-list.
-const MERIDIAN_ORIGIN = /^https:\/\/[a-z0-9-]+--meridian--[a-z0-9-]+\.aem\.(live|page)$/;
+// The app runs from its own Meridian origin, which varies by host: the EDS edge
+// (…--meridian--<org>.aem.live/.page) AND DA's app viewer, which serves the tool
+// from …--meridian--<org>.(preview|live).da.live. Allow any of them.
+const MERIDIAN_ORIGIN = /^https:\/\/[a-z0-9-]+--meridian--[a-z0-9-]+\.(aem\.(live|page)|(preview|live)\.da\.live)$/;
 
 function allowOrigin(origin) {
   return origin && (ALLOWED_ORIGINS.has(origin) || MERIDIAN_ORIGIN.test(origin));
