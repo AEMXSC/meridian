@@ -16,7 +16,7 @@
 /* eslint-disable no-underscore-dangle, import/no-unresolved, no-console, class-methods-use-this */
 import DA_SDK from 'https://da.live/nx/utils/sdk.js';
 import { LitElement, html, nothing } from 'da-lit';
-import DaStore, { listSites, assertPageRef } from './core/store.js';
+import DaStore, { listSites, listOrgs, assertPageRef } from './core/store.js';
 import scanCanonical from './core/scan.js';
 import variantStatus from './core/variant-status.js';
 import { diffVariants, onlyChanges } from './core/diff.js';
@@ -138,6 +138,7 @@ class MeridianApp extends LitElement {
     _proposal: { state: true },
     _config: { state: true },
     _sites: { state: true },
+    _orgs: { state: true },
     _recent: { state: true },
     _translate: { state: true },
     _catalog: { state: true },
@@ -189,6 +190,7 @@ class MeridianApp extends LitElement {
     this._config = null;
     this._recent = this.loadRecent();
     this._sites = [];
+    this._orgs = [];
     this._translate = null;
     this._catalog = null;
     // Where materialized pages publish: 'sandbox' (namespaced /meridian/live) or
@@ -267,6 +269,13 @@ class MeridianApp extends LitElement {
 
   async loadSites() {
     this._sites = await listSites(this._org);
+  }
+
+  // Every org the signed-in user can access, so the scope picker offers them all
+  // (not just recents). Best-effort; falls back to the recents datalist on any
+  // failure or if DA doesn't enumerate orgs for this user.
+  async loadOrgs() {
+    this._orgs = await listOrgs();
   }
 
   async onOrgChange(e) {
@@ -804,7 +813,8 @@ class MeridianApp extends LitElement {
             aria-label="Organization"
             value=${this._org} ?disabled=${this._state === 'loading'} @change=${this.onOrgChange} />
           <datalist id="mrd-orgs">
-            ${[...new Set(this._recent.map((r) => r.org))].map((o) => html`<option value=${o}></option>`)}
+            ${[...new Set([...this._orgs, ...this._recent.map((r) => r.org)])].filter(Boolean)
+    .map((o) => html`<option value=${o}></option>`)}
           </datalist>
           <span class="mrd-scope-sep" aria-hidden="true">/</span>
           <select class="mrd-scope-select" id="site-input" aria-label="Site"
@@ -2236,8 +2246,9 @@ customElements.define('meridian-app', MeridianApp);
     cmp.context = sdk.context;
     cmp._org = cmp._org || sdk.context.org || '';
     cmp._site = cmp._site || sdk.context.site || sdk.context.repo || '';
-    // Always load the org's site list so the picker offers every site — not
-    // just recents — even when we also deep-link straight into one and scan.
+    // Offer every org the user can access (not just recents) now that we have a
+    // DA session, and every site in the current org.
+    cmp.loadOrgs();
     if (cmp._org) cmp.loadSites();
     if (cmp._org && cmp._site) cmp.scan();
   } else {

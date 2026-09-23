@@ -189,6 +189,22 @@ export async function listSites(org) {
   }
 }
 
+// List the orgs the signed-in user can access via the DA list API (no org
+// segment), so the scope picker can offer every org — not just recently-used
+// ones. Best-effort: any failure (or an unexpected shape) yields [] and callers
+// fall back to the recents datalist.
+export async function listOrgs() {
+  try {
+    const resp = await daFetch(`${DA_ORIGIN}/list`, { cache: 'no-store' });
+    if (!resp.ok) return [];
+    const items = await resp.json();
+    if (!Array.isArray(items)) return [];
+    return items.filter((item) => item && item.name && !item.ext).map((item) => item.name);
+  } catch {
+    return [];
+  }
+}
+
 // Shape one raw DA list entry into a page-tree node: { name, path, ext, isFolder }.
 // Pure (no network) so the normalization — extension detection and the
 // folders-have-no-extension rule — is unit-testable without a live DA project.
