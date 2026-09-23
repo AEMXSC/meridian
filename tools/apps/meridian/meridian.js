@@ -824,7 +824,7 @@ class MeridianApp extends LitElement {
             @click=${() => { this._tab = 'overview'; }}>Dashboard</button>
           <button role="tab" aria-selected=${this._tab === 'pages'}
             class="mrd-tab ${this._tab === 'pages' ? 'active' : ''}"
-            @click=${() => { this._tab = 'pages'; }}>Localize</button>
+            @click=${() => { this._tab = 'pages'; }}>Pages</button>
           <button role="tab" aria-selected=${this._tab === 'exposure'}
             class="mrd-tab ${this._tab === 'exposure' ? 'active' : ''}"
             @click=${() => { this._tab = 'exposure'; }}>Issues</button>
@@ -2015,6 +2015,10 @@ class MeridianApp extends LitElement {
         <sl-button class="primary outline" ?disabled=${this._pageBusy}
           @click=${() => this.checkStatus()}>Check status</sl-button>
       </div>
+      <p class="mrd-action-help">
+        <strong>Translate</strong> = language only (machine). <strong>Localize</strong> = language +
+        market copy &amp; compliance you author. Localize includes translation.
+      </p>
       ${this._bulkResults.length ? html`
         <div class="mrd-section-label">Bulk translate — ${this._bulkResults.length} page × market</div>
         <div class="mrd-matrix-wrap">

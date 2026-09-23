@@ -947,7 +947,13 @@
 .mrd-page-actions {
   display: flex;
   gap: var(--mrd-space-100);
-  margin-bottom: var(--mrd-space-200);
+  margin-bottom: var(--mrd-space-100);
+}
+
+.mrd-action-help {
+  margin: 0 0 var(--mrd-space-200);
+  font-size: 12px;
+  color: var(--mrd-text-muted);
 }
 
 /* Localization risk radar chips */
