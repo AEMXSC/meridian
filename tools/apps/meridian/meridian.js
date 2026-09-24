@@ -388,8 +388,12 @@ class MeridianApp extends LitElement {
       if (deepPage) {
         this._pageRef = deepPage;
         this._tab = 'pages';
+        if (deepMarket) this._localeSel = new Set([deepMarket]);
+        // Arriving from the editor plugin: show the comparison straight away.
+        this.previewPageSelection();
+      } else if (deepMarket) {
+        this._localeSel = new Set([deepMarket]);
       }
-      if (deepMarket) this._localeSel = new Set([deepMarket]);
       this.saveRecent(this._org, this._site);
       this.loadQueue();
       if (this._canonicalId) this.loadAdaptations();
@@ -1584,6 +1588,64 @@ class MeridianApp extends LitElement {
     }
   }
 
+  // Select a page and immediately preview its existing localized copies — so the
+  // canvas shows a comparison the moment you pick a page, not only after Translate.
+  pickPage(ref) {
+    this._pageRef = ref;
+    this._browseOpen = false;
+    this._treeQuery = '';
+    this._pageRisk = [];
+    this._previewOpen = new Set();
+    this.previewPageSelection();
+  }
+
+  // Seed the canvas from what already exists (manifest + edge URLs, no
+  // re-translation): a side-by-side compare for each selected market that has a
+  // copy (staged → reviewable/promotable, live → published), plus risk chips for
+  // every market. Missing markets have no pane — the chips say "not localized".
+  async previewPageSelection() {
+    const ref = this._pageRef;
+    if (!ref) return;
+    this._pageError = '';
+    this._pageResults = new Map();
+    this._pageBusy = true;
+    this._pageBusyMsg = 'Loading preview…';
+    try {
+      const { rows } = await this.pageStore().pageReferenceStatus(ref);
+      // A newer selection may have superseded this one while the fetch was in
+      // flight — don't overwrite the current page's canvas with a stale response.
+      if (this._pageRef !== ref) return;
+      const byLocale = new Map(rows.map((r) => [r.locale, r]));
+      const riskState = (r) => {
+        if (r.status === 'missing') return 'missing';
+        return r.stale ? 'stale' : 'current';
+      };
+      this._pageRisk = rows.map((r) => ({ locale: r.locale, state: riskState(r) }));
+      const results = new Map();
+      [...this._localeSel].forEach((locale) => {
+        const row = byLocale.get(locale);
+        if (!row || row.status === 'missing') return;
+        const stage = row.status === 'live' ? 'live' : 'staged';
+        results.set(locale, {
+          ok: true,
+          kind: row.status,
+          ref,
+          mode: row.status === 'live' ? 'locale-root' : 'sandbox',
+          sourceUrl: this.pageEdgeUrl(ref),
+          liveUrl: this.localizedEdgeUrl(ref, locale, stage),
+          path: row.status === 'live' ? `/${locale}/${ref}` : `/meridian/live/${locale}/${ref}`,
+        });
+      });
+      this._pageResults = results;
+      // Open the first comparison so the side-by-side shows without a click.
+      if (results.size) this._previewOpen = new Set([[...results.keys()][0]]);
+    } catch (e) {
+      if (this._pageRef === ref) this._pageError = e.message;
+    } finally {
+      if (this._pageRef === ref) this._pageBusy = false;
+    }
+  }
+
   // TRANSLATE: language layer only, published immediately (the fast path). The
   // withheld commercial/compliance segments stay in the source language.
   // Refuse to discard hand-authored, unpublished overrides silently. Returns
@@ -2099,6 +2161,7 @@ class MeridianApp extends LitElement {
     const mem = r.memory ? ` · ${r.memory}% from memory` : '';
     let badge = `translated · language ${pct}%${mem}`;
     if (r.kind === 'staged') badge = 'staged — review, then promote';
+    else if (r.kind === 'live') badge = 'live — published';
     else if (r.kind === 'localize') badge = `localized · language ${pct}% · market ${r.heldDone}/${r.heldTotal}${mem}`;
     const previewing = this._previewOpen.has(locale);
     return html`
@@ -2265,12 +2328,7 @@ class MeridianApp extends LitElement {
           aria-label="Select ${ref} for batch translate"
           @change=${() => this.toggleSelectPage(ref)} />
         <button class="mrd-tree-page ${sel ? 'sel' : ''}" role="treeitem" aria-selected=${sel}
-          @click=${() => {
-    this._pageRef = ref;
-    this._browseOpen = false;
-    this._treeQuery = '';
-    this._pageRisk = [];
-  }}>${displayName}</button>
+          @click=${() => this.pickPage(ref)}>${displayName}</button>
         ${status.length ? html`<span class="mrd-pick-status">${status.map((s) => html`
           <span class="mrd-risk-chip mrd-risk-${s.stage === 'live' ? 'current' : 'staged'}"
             title="${s.locale}: ${s.stage}">${s.locale}</span>`)}</span>` : nothing}
