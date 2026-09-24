@@ -946,6 +946,18 @@
   margin-bottom: var(--mrd-space-200);
 }
 
+/* Cross-page localize-drafts banner: message + Resume/Discard inline. */
+.mrd-draft-banner {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--mrd-space-100);
+}
+
+.mrd-draft-banner span {
+  margin-right: auto;
+}
+
 .mrd-lang-chip {
   font: inherit;
   font-size: 13px;

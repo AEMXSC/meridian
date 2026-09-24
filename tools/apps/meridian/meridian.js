@@ -2341,6 +2341,12 @@ class MeridianApp extends LitElement {
     // of stacked below a full-height page tree.
     const hasCanvas = this._pageBusy || this._bulkResults.length || this._pageRisk.length
       || this._pageError || this._localizeDrafts.size || this._pageResults.size;
+    // Localize drafts belong to one page (_localizeRef). Only show the editor on
+    // that page; on any other page surface a banner instead of leaking a stale
+    // editor into the wrong page's canvas (drafts are kept, never silently lost).
+    const draftsHere = this._localizeDrafts.size && this._localizeRef === this._pageRef;
+    const draftsElsewhere = this._localizeDrafts.size && this._localizeRef
+      && this._localizeRef !== this._pageRef;
     return html`
       <div class="mrd-workbench">
         <aside class="mrd-rail" aria-label="Page and market controls">
@@ -2427,7 +2433,15 @@ class MeridianApp extends LitElement {
                 </span>`)}
             </div>` : nothing}
           ${this._pageError ? html`<div class="nx-alert warning">${this._pageError}</div>` : nothing}
-          ${this._localizeDrafts.size ? html`
+          ${draftsElsewhere ? html`
+            <div class="nx-alert warning mrd-draft-banner">
+              <span>Unpublished market drafts on <strong>${this._localizeRef}</strong>.</span>
+              <sl-button ?disabled=${this._pageBusy}
+                @click=${() => this.pickPage(this._localizeRef)}>Resume ${this._localizeRef}</sl-button>
+              <sl-button class="primary outline" ?disabled=${this._pageBusy}
+                @click=${() => this.clearDrafts()}>Discard</sl-button>
+            </div>` : nothing}
+          ${draftsHere ? html`
             <div class="mrd-section-label">
               <span>Localize — author each market's commercial/compliance text, then publish per market:</span>
               <sl-button class="primary outline mrd-clear-drafts" ?disabled=${this._pageBusy}
@@ -2582,7 +2596,7 @@ class MeridianApp extends LitElement {
               <tr>
                 <th scope="row" class="mrd-matrix-page">
                   <button class="mrd-matrix-link"
-                    @click=${() => { this._pageRef = row.ref; this._pageRisk = []; this._tab = 'pages'; }}
+                    @click=${() => { this._tab = 'pages'; this.pickPage(row.ref); }}
                     title="Open in Pages">${row.ref}</button>
                 </th>
                 ${row.cells.map((c) => {
