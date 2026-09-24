@@ -407,7 +407,26 @@ class MeridianApp extends LitElement {
       }
     } catch (e) {
       console.error(e);
-      this._error = e.message || 'Scan failed.';
+      // A 403 means the user is authenticated but has no access to this org/site
+      // (e.g. a shared link carried someone else's org). Recover so ANY user can
+      // use the app: switch to an org they can actually read, and let them pick a
+      // site. Non-403 errors surface as before.
+      if (/^Read failed for .*\(403\)$/.test(e.message || '')) {
+        const orgs = await listOrgs().catch(() => []);
+        const others = orgs.filter((o) => o && o !== this._org);
+        if (others.length) {
+          this._orgs = orgs;
+          [this._org] = others;
+          this._site = '';
+          this._error = `You don't have access to that org. Switched to "${others[0]}" — pick a site and hit Scan.`;
+          this.loadSites();
+        } else {
+          const scope = this._site ? `${this._org}/${this._site}` : this._org;
+          this._error = `You don't have access to ${scope}. Enter an org and site you can access above, then Scan.`;
+        }
+      } else {
+        this._error = e.message || 'Scan failed.';
+      }
       this._state = 'init';
     }
   }
