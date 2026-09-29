@@ -58,6 +58,10 @@ export function buildPageReference({
       status,
       stale: status !== 'missing' && risk[locale] === 'stale',
       mode: entry ? entry.mode : null,
+      // The localized ref this market published under — a translated slug when
+      // slug translation is on, otherwise the source ref. Callers build the
+      // localized URL from this.
+      slug: (entry && entry.slug) || ref,
       at: entry ? entry.at ?? null : null,
     };
   });

@@ -96,10 +96,12 @@ class DaMeridian extends LitElement {
   }
 
   // The published edge URL for a localized page — clean locale root when live,
-  // the sandbox path when still staged.
-  _edgeUrl(locale, status) {
+  // the sandbox path when still staged. Uses the market's localized ref (a
+  // translated slug when slug translation is on), falling back to the source ref.
+  _edgeUrl(locale, status, slug) {
     const { org, site } = this.details;
-    const rel = status === 'live' ? `/${locale}/${this._ref}` : `/meridian/live/${locale}/${this._ref}`;
+    const ref = slug || this._ref;
+    const rel = status === 'live' ? `/${locale}/${ref}` : `/meridian/live/${locale}/${ref}`;
     return `https://main--${site}--${org}.aem.live${rel}`;
   }
 
@@ -117,7 +119,7 @@ class DaMeridian extends LitElement {
           ${row.status === 'missing'
     ? html`<a href=${appLink} target="_blank" rel="noopener">Translate ↗</a>`
     : html`
-            <a href=${this._edgeUrl(row.locale, row.status)} target="_blank" rel="noopener">View ↗</a>
+            <a href=${this._edgeUrl(row.locale, row.status, row.slug)} target="_blank" rel="noopener">View ↗</a>
             <a href=${appLink} target="_blank" rel="noopener">${row.status === 'staged' ? 'Review ↗' : 'Compare ↗'}</a>`}
         </span>
       </div>`;

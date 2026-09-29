@@ -397,7 +397,14 @@ export default class DaStore {
     const key = (e) => `${e.locale}|${e.ref}`;
     const map = new Map((await this.readManaged()).map((e) => [key(e), e]));
     entries.forEach((e) => map.set(key(e), {
-      ref: assertPageRef(e.ref), locale: e.locale, mode: e.mode || 'sandbox', at: Date.now(),
+      ref: assertPageRef(e.ref),
+      locale: e.locale,
+      mode: e.mode || 'sandbox',
+      // A translated slug (localized ref) when slug translation is on; validated
+      // like any ref so it can't escape the site. Absent → the localized page
+      // lives at the source ref, as before.
+      ...(e.slug && e.slug !== e.ref ? { slug: assertPageRef(e.slug) } : {}),
+      at: Date.now(),
     }));
     const next = [...map.values()];
     await this.#writeJson(`${this.#base}/managed.json`, { entries: next });

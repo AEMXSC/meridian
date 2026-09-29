@@ -995,6 +995,25 @@
   color: var(--mrd-text-muted);
 }
 
+.mrd-slug-toggle {
+  display: flex;
+  gap: 8px;
+  align-items: flex-start;
+  margin: var(--mrd-space-100) 0 var(--mrd-space-200);
+  font-size: 12px;
+  color: var(--mrd-text-muted);
+  cursor: pointer;
+}
+
+.mrd-slug-toggle input {
+  margin-top: 2px;
+  flex: 0 0 auto;
+}
+
+.mrd-slug-toggle code {
+  font-size: 0.92em;
+}
+
 /* In-progress indicator while a page action runs */
 .mrd-busy {
   display: flex;

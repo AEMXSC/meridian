@@ -56,8 +56,11 @@ export function publishRelPath(mode, locale, ref, base = '/meridian') {
 // Build the hreflang cluster index from manifest entries. Only locale-root
 // entries get reciprocal alternates (sandbox URLs are not canonical). Shape:
 //   { [sourceRef]: { en: '/ref', 'x-default': '/ref', fr: '/fr/ref', ... } }
-// The runtime snippet reads this to inject <link rel="alternate" hreflang> on
-// both the source page and every localized page.
+// A market can publish under a translated slug (e.suffix `slug`), so its
+// alternate points at /{locale}/{slug} while the cluster is still keyed by, and
+// the source/x-default still point at, the untranslated source ref. The runtime
+// snippet reads this to inject <link rel="alternate" hreflang> on both the source
+// page and every localized page.
 export function buildHreflangIndex(entries, sourceLocale = 'en') {
   const clusters = {};
   (entries || [])
@@ -66,7 +69,7 @@ export function buildHreflangIndex(entries, sourceLocale = 'en') {
       if (!clusters[e.ref]) {
         clusters[e.ref] = { [sourceLocale]: `/${e.ref}`, 'x-default': `/${e.ref}` };
       }
-      clusters[e.ref][e.locale] = `/${e.locale}/${e.ref}`;
+      clusters[e.ref][e.locale] = `/${e.locale}/${e.slug || e.ref}`;
     });
   return clusters;
 }

@@ -27,6 +27,7 @@ import { readSheet } from './core/da-config.js';
 import runWithConcurrency from './core/concurrency.js';
 import { LAYER_PRECEDENCE } from './core/schemas.js';
 import { createTranslator } from './core/translate.js';
+import { humanizeSlug, chooseSlug } from './core/slug.js';
 import { localizePage, applyLocalization, hasPendingOverrides } from './core/localize-page.js';
 import { createTmTranslator, record as tmRecord, lookup as tmLookup } from './core/tm.js';
 import { icon } from '../msm/core/icons.js';
@@ -184,6 +185,7 @@ class MeridianApp extends LitElement {
     _treeQuery: { state: true },
     _selectedPages: { state: true },
     _managed: { state: true },
+    _translateSlug: { state: true },
     _bulkResults: { state: true },
     _segEditOpen: { state: true },
     _overlayLocale: { state: true },
@@ -230,6 +232,10 @@ class MeridianApp extends LitElement {
     // Where materialized pages publish: 'sandbox' (namespaced /meridian/live) or
     // 'locale-root' (clean /{locale} URLs). Defaults from config; toggleable.
     this._publishMode = 'sandbox';
+    // Opt-in: translate the page name (slug) so a market publishes at a localized
+    // URL (/es/financiacion), not /es/financing. Off = every URL stays the source
+    // ref, so behaviour is unchanged until an author turns it on.
+    this._translateSlug = false;
     // The site's source language — never offered as a target market. Set from
     // config in scan(); 'en' until then.
     this._sourceLocale = 'en';
@@ -1645,14 +1651,16 @@ class MeridianApp extends LitElement {
         const row = byLocale.get(locale);
         if (!row || row.status === 'missing') return;
         const stage = row.status === 'live' ? 'live' : 'staged';
+        const slug = row.slug || ref;
         results.set(locale, {
           ok: true,
           kind: row.status,
           ref,
+          slug,
           mode: row.status === 'live' ? 'locale-root' : 'sandbox',
           sourceUrl: this.pageEdgeUrl(ref),
-          liveUrl: this.localizedEdgeUrl(ref, locale, stage),
-          path: row.status === 'live' ? `/${locale}/${ref}` : `/meridian/live/${locale}/${ref}`,
+          liveUrl: this.localizedEdgeUrl(ref, locale, stage, slug),
+          path: row.status === 'live' ? `/${locale}/${slug}` : `/meridian/live/${locale}/${slug}`,
         });
       });
       this._pageResults = results;
@@ -1694,13 +1702,18 @@ class MeridianApp extends LitElement {
 
   // Promote a reviewed sandbox page straight to the live locale URL (self-review
   // path). Routes to the market's target site; records the manifest + hreflang.
-  async promoteToLive(locale, ref) {
+  async promoteToLive(locale, ref, slug) {
     this._pageBusy = true;
     this._pageError = '';
     try {
       this._pageBusyMsg = `Promoting ${locale} to live…`;
-      const pub = await this.storeForSite(this.siteForLocale(locale)).promotePage(locale, ref);
-      await this.saveManagedGrouped([{ ref, locale, mode: 'locale-root' }]);
+      // The sandbox page lives at its (possibly translated) slug; promote reads
+      // and republishes at that path, while the manifest keeps the source ref.
+      const target = slug || ref;
+      const pub = await this.storeForSite(this.siteForLocale(locale)).promotePage(locale, target);
+      await this.saveManagedGrouped([{
+        ref, locale, mode: 'locale-root', slug: target,
+      }]);
       this.patchResult(locale, { promoted: true, liveUrl: pub.liveUrl, path: pub.path });
       this.showToast(`Promoted ${locale} → live (${pub.path})`);
     } catch (e) {
@@ -1728,7 +1741,7 @@ class MeridianApp extends LitElement {
 
   // Request approval instead of promoting directly (governed path): file a
   // promotion request a different reviewer approves in the Approvals tab.
-  async requestPromotion(locale, ref) {
+  async requestPromotion(locale, ref, slug) {
     this._pageBusy = true;
     this._pageError = '';
     try {
@@ -1736,6 +1749,9 @@ class MeridianApp extends LitElement {
       const record = {
         ref,
         locale,
+        // The reviewed sandbox page's (possibly translated) slug, so the approver
+        // promotes the right path even when slug translation is on.
+        ...(slug && slug !== ref ? { slug } : {}),
         site: this.siteForLocale(locale),
         requestedBy: (this.context && this.context.user && this.context.user.email) || 'author',
         at: Date.now(),
@@ -1764,8 +1780,11 @@ class MeridianApp extends LitElement {
     this._queueBusy = new Set(this._queueBusy).add(key);
     try {
       const store = this.storeForSite(item.site || this.siteForLocale(item.locale));
-      await store.promotePage(item.locale, item.ref);
-      await this.saveManagedGrouped([{ ref: item.ref, locale: item.locale, mode: 'locale-root' }]);
+      const target = item.slug || item.ref;
+      await store.promotePage(item.locale, target);
+      await this.saveManagedGrouped([{
+        ref: item.ref, locale: item.locale, mode: 'locale-root', slug: target,
+      }]);
       await store.removePromotionRequest(item.locale, item.ref);
       this.dropPromotion(item.locale, item.ref);
       this.showToast(`Approved & promoted ${item.locale} / ${item.ref} → live`);
@@ -1856,6 +1875,31 @@ class MeridianApp extends LitElement {
     return locales.map((code) => byLocale.get(code) || { locale: code, state: 'missing' });
   }
 
+  // The ref a market publishes under. With slug translation on, the page's
+  // last-segment name is machine-translated and slugified so the localized page
+  // lands at /es/financiacion instead of /es/financing; the source ref stays the
+  // manifest identity. `existing` is the target site's manifest entries, used to
+  // (a) REUSE an already-chosen slug so a re-run never re-translates and orphans
+  // the live URL, and (b) de-duplicate against other pages' slugs in this locale
+  // so two source names that translate alike can't clobber each other. Best-
+  // effort: off, empty, or any failure returns the source ref.
+  async localizedRefFor(page, locale, translate, existing = []) {
+    if (!this._translateSlug) return page;
+    const prior = existing.find((e) => e.ref === page && e.locale === locale && e.slug);
+    if (prior) return prior.slug;
+    const name = humanizeSlug(page.split('/').pop());
+    if (!name) return page;
+    try {
+      const m = await translate([name], { from: this._sourceLocale, to: locale });
+      const taken = new Set(existing
+        .filter((e) => e.locale === locale && e.ref !== page && e.slug)
+        .map((e) => e.slug));
+      return chooseSlug(page, (m && m.get && m.get(name)) || name, taken);
+    } catch {
+      return page;
+    }
+  }
+
   async translatePages() {
     const ctx = this.pageInputs();
     if (ctx.error) { this._pageError = ctx.error; return; }
@@ -1881,13 +1925,18 @@ class MeridianApp extends LitElement {
           // never the flagged ones — TM stores approved translations.
           const learned = new Map([...tmt.learned].filter(([s]) => out.dict.has(s)));
           if (learned.size) await this.saveTm(targetStore, tm, learned, 'mt', locale);
-          await targetStore.writeLocalizedPage(locale, ctx.ref, out.html, mode);
-          const pub = await targetStore.publishLocalizedPage(locale, ctx.ref, mode);
+          const managed = this._translateSlug
+            ? await targetStore.readManaged().catch(() => [])
+            : [];
+          const targetRef = await this.localizedRefFor(ctx.ref, locale, ctx.translate, managed);
+          await targetStore.writeLocalizedPage(locale, targetRef, out.html, mode);
+          const pub = await targetStore.publishLocalizedPage(locale, targetRef, mode);
           return [locale, {
             ok: true,
             kind: 'translate',
             locale,
             ref: ctx.ref,
+            slug: targetRef,
             mode,
             coverage: out.coverage,
             review: out.review,
@@ -1903,7 +1952,9 @@ class MeridianApp extends LitElement {
       this._pageResults = new Map(settled.map((s) => s.value));
       const ok = [...this._pageResults.values()].filter((r) => r.ok).length;
       await this.saveManagedGrouped([...this._pageResults]
-        .filter(([, r]) => r.ok).map(([locale]) => ({ ref: ctx.ref, locale, mode })));
+        .filter(([, r]) => r.ok).map(([locale, r]) => ({
+          ref: ctx.ref, locale, mode, slug: r.slug,
+        })));
       if (ok) this.showToast(`Translated & published ${ok} market(s) of ${ctx.ref}`);
     } catch (e) {
       this._pageError = e.message;
@@ -1957,6 +2008,23 @@ class MeridianApp extends LitElement {
         learnedByLocale.set(locale, new Map());
       }), 4);
 
+      // Slug translation: pre-compute each page's localized slug per locale in a
+      // single sequential pass (keyed `${p}|${locale}`), so a re-run reuses the
+      // chosen slug and no two pages in this batch collide — the concurrent
+      // translate tasks below just look theirs up.
+      const slugMap = new Map();
+      if (this._translateSlug) {
+        await runWithConcurrency(ctx.locales.map((locale) => async () => {
+          const store = this.storeForSite(this.siteForLocale(locale));
+          const chosen = [...(await store.readManaged().catch(() => []))];
+          await pages.reduce((prev, p) => prev.then(async () => {
+            const ref = await this.localizedRefFor(p, locale, ctx.translate, chosen);
+            slugMap.set(`${p}|${locale}`, ref);
+            chosen.push({ ref: p, locale, slug: ref });
+          }), Promise.resolve());
+        }), 4);
+      }
+
       const tasks = [];
       pages.forEach((p) => ctx.locales.forEach((locale) => {
         tasks.push(async () => {
@@ -1974,11 +2042,12 @@ class MeridianApp extends LitElement {
             const acc = learnedByLocale.get(locale);
             tmt.learned.forEach((t, s) => { if (out.dict.has(s)) acc.set(s, t); });
             const targetStore = this.storeForSite(this.siteForLocale(locale));
-            await targetStore.writeLocalizedPage(locale, p, out.html, mode);
-            const pub = await targetStore.publishLocalizedPage(locale, p, mode);
+            const targetRef = this._translateSlug ? (slugMap.get(`${p}|${locale}`) || p) : p;
+            await targetStore.writeLocalizedPage(locale, targetRef, out.html, mode);
+            const pub = await targetStore.publishLocalizedPage(locale, targetRef, mode);
             const pct = Math.round((out.coverage?.ratio ?? 0) * 100);
             return {
-              ref: p, locale, ok: true, pct, liveUrl: pub.liveUrl,
+              ref: p, locale, slug: targetRef, ok: true, pct, liveUrl: pub.liveUrl,
             };
           } catch (e) {
             return {
@@ -1997,7 +2066,9 @@ class MeridianApp extends LitElement {
       }), 4);
       const ok = this._bulkResults.filter((r) => r.ok).length;
       await this.saveManagedGrouped(this._bulkResults
-        .filter((r) => r.ok).map((r) => ({ ref: r.ref, locale: r.locale, mode })));
+        .filter((r) => r.ok).map((r) => ({
+          ref: r.ref, locale: r.locale, mode, slug: r.slug,
+        })));
       this.showToast(`Translated ${ok}/${this._bulkResults.length} page × market ${label || ''}`.trim());
     } catch (e) {
       this._pageError = e.message;
@@ -2132,8 +2203,14 @@ class MeridianApp extends LitElement {
       );
       this._pageBusyMsg = `Publishing ${locale}…`;
       const localizedHtml = applyLocalization(this._localizeSource, draft.dict, authored);
-      await store.writeLocalizedPage(locale, this._localizeRef, localizedHtml, mode);
-      const pub = await store.publishLocalizedPage(locale, this._localizeRef, mode);
+      const cfg = this._config || {};
+      const translate = createTranslator(daFetch, {
+        org: this._org, site: this._site, formality: cfg.formality, glossaries: cfg.glossaries,
+      });
+      const existing = this._translateSlug ? await store.readManaged().catch(() => []) : [];
+      const targetRef = await this.localizedRefFor(this._localizeRef, locale, translate, existing);
+      await store.writeLocalizedPage(locale, targetRef, localizedHtml, mode);
+      const pub = await store.publishLocalizedPage(locale, targetRef, mode);
       // Commit the successful publish (result + drop the draft) BEFORE touching
       // TM, so a TM hiccup can never mislabel a live page as failed or lose the
       // draft.
@@ -2142,6 +2219,7 @@ class MeridianApp extends LitElement {
         ok: true,
         kind: 'localize',
         ref: this._localizeRef,
+        slug: targetRef,
         mode,
         coverage: draft.coverage,
         heldTotal: draft.review.length,
@@ -2154,7 +2232,9 @@ class MeridianApp extends LitElement {
       drafts.delete(locale);
       this._localizeDrafts = drafts;
       this.showToast(`Localized & published ${locale} — live`);
-      await this.saveManaged(store, [{ ref: this._localizeRef, locale, mode }]);
+      await this.saveManaged(store, [{
+        ref: this._localizeRef, locale, mode, slug: targetRef,
+      }]);
       // Human sign-off becomes durable TM (origin human), reused next run — but
       // it is best-effort: the page is already live.
       if (heldDone) await this.saveTm(store, await store.readTm(locale), authored, 'human', locale);
@@ -2201,9 +2281,9 @@ class MeridianApp extends LitElement {
             ${r.mode === 'sandbox' && r.ref && !r.promoted ? html`
               <sl-button ?disabled=${this._pageBusy}
                 title="Publish this reviewed page to the live /${locale}/ URL"
-                @click=${() => this.promoteToLive(locale, r.ref)}>Promote to live ↑</sl-button>
+                @click=${() => this.promoteToLive(locale, r.ref, r.slug)}>Promote to live ↑</sl-button>
               <sl-button class="primary outline" ?disabled=${this._pageBusy || r.requested}
-                @click=${() => this.requestPromotion(locale, r.ref)}>${r.requested ? 'Approval requested ✓' : 'Request approval'}</sl-button>
+                @click=${() => this.requestPromotion(locale, r.ref, r.slug)}>${r.requested ? 'Approval requested ✓' : 'Request approval'}</sl-button>
             ` : nothing}
             ${r.promoted ? html`<span class="mrd-kind mrd-positive">promoted → live</span>` : nothing}
           </span>
@@ -2411,6 +2491,11 @@ class MeridianApp extends LitElement {
             <sl-button class="primary outline" ?disabled=${this._pageBusy}
               @click=${() => this.checkStatus()}>Check status</sl-button>
           </div>
+          <label class="mrd-slug-toggle">
+            <input type="checkbox" ?checked=${this._translateSlug} ?disabled=${this._pageBusy}
+              @change=${(e) => { this._translateSlug = e.target.checked; }} />
+            <span>Translate the page name (slug) &mdash; publishes at <code>/es/financiacion</code>, not <code>/es/financing</code></span>
+          </label>
           <p class="mrd-action-help">
             <strong>Translate</strong> = language only (machine). <strong>Localize</strong> = language
             + market copy &amp; compliance you author (includes translation).
@@ -2549,9 +2634,13 @@ class MeridianApp extends LitElement {
   // The edge URL of a localized page for a dashboard cell: the live locale URL
   // when promoted, or the sandbox preview URL when only staged. Routes to the
   // market's target site (multi-site).
-  localizedEdgeUrl(ref, locale, stage) {
+  localizedEdgeUrl(ref, locale, stage, slug) {
     const site = this.siteForLocale(locale);
-    const rel = stage === 'live' ? `/${locale}/${ref}` : `/meridian/live/${locale}/${ref}`;
+    // The localized page may sit at a translated slug: prefer an explicit one,
+    // else the manifest's, else the source ref.
+    const entry = (this._managed || []).find((e) => e.ref === ref && e.locale === locale);
+    const path = slug || (entry && entry.slug) || ref;
+    const rel = stage === 'live' ? `/${locale}/${path}` : `/meridian/live/${locale}/${path}`;
     return `https://main--${site}--${this._org}.aem.live${rel}`;
   }
 
@@ -2562,14 +2651,17 @@ class MeridianApp extends LitElement {
     this._pageRef = ref;
     this._localeSel = new Set([locale]);
     this._pageError = '';
+    const entry = (this._managed || []).find((e) => e.ref === ref && e.locale === locale);
+    const slug = (entry && entry.slug) || ref;
     this._pageResults = new Map([[locale, {
       ok: true,
       kind: 'staged',
       ref,
+      slug,
       mode: 'sandbox',
       sourceUrl: this.pageEdgeUrl(ref),
-      liveUrl: this.localizedEdgeUrl(ref, locale, 'staged'),
-      path: `/meridian/live/${locale}/${ref}`,
+      liveUrl: this.localizedEdgeUrl(ref, locale, 'staged', slug),
+      path: `/meridian/live/${locale}/${slug}`,
     }]]);
     this._tab = 'pages';
   }
