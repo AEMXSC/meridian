@@ -63,6 +63,8 @@
   --mrd-space-200: 16px;
   --mrd-space-300: 24px;
 
-  /* Adobe Clean — the Spectrum typeface, with a graceful system fallback. */
-  --mrd-font: 'adobe-clean', var(--body-font-family, 'Source Sans Pro', -apple-system, system-ui, sans-serif);
+  /* Adobe Clean — the Spectrum typeface. "Adobe Clean" is the installed-font name
+     (renders on Adobe machines + inside DA); 'adobe-clean' is the Typekit name;
+     Source Sans 3 is the web fallback loaded by the demo. */
+  --mrd-font: 'Adobe Clean', 'adobe-clean', var(--body-font-family, 'Source Sans 3', 'Source Sans Pro', -apple-system, system-ui, sans-serif);
 }
