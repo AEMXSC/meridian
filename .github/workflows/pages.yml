@@ -37,6 +37,8 @@ jobs:
           <a href="tools/apps/meridian/demo/">Open the Meridian demo</a>
           HTML
       - uses: actions/configure-pages@v5
+        with:
+          enablement: true
       - uses: actions/upload-pages-artifact@v3
         with:
           path: _site
