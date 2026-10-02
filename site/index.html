@@ -412,6 +412,24 @@
       keep everything else in sync" works without MSM's break-the-link problem.
     </p>
 
+    <h3>Why it exists, from the RFP data</h3>
+    <p class="section-intro">Market Rules isn't a model we liked on paper. Each layer answers a requirement
+      that showed up repeatedly across the 70+ RFPs:</p>
+    <ul class="clean">
+      <li><b>Regulated-market compliance.</b> Banking, pharma, and insurance RFPs require locale-specific
+        legal disclosures that legal owns and signs off, and that a machine must never author. This is the
+        single most common hard requirement, and it forced the compliance layer plus the publish gate.</li>
+      <li><b>Price &amp; offer localization.</b> Commercial RFPs need per-market currency, offers, and
+        regulated pricing, owned by the business and never auto-translated. That became the commercial layer.</li>
+      <li><b>Brand &amp; terminology control.</b> RFPs consistently ask for do-not-translate brand terms and
+        approved glossaries per market, which is why the language layer is governed, not a raw MT dump.</li>
+      <li><b>Edit once, keep local edits.</b> The recurring complaint about MSM: a rollout overwrites a
+        market's customizations, or breaking inheritance to customize means it stops getting future updates.
+        Inherit-by-default with typed overrides is the direct answer.</li>
+      <li><b>Governance &amp; audit.</b> Enterprise RFPs require who-changed-what and approval trails, which
+        is why every entry carries a reason and provenance and writes an immutable version.</li>
+    </ul>
+
     <h3>Worked example: a "Spring Refresh" offer page in Spanish (es-MX)</h3>
     <div class="stack">
       <div class="layer canon">
@@ -523,7 +541,15 @@
       </div>
     </div>
 
-    <div class="grid cols-2" style="margin-top:16px">
+    <div class="grid cols-3" style="margin-top:16px">
+      <div class="card">
+        <span class="tag">Side-by-side preview</span>
+        <h3>Compare source and localized, live</h3>
+        <p>Click a page and its current state previews on the right straight away. During translate and
+          localize, the English source and the localized version sit side by side, so review happens against
+          the real rendered page, not an XLIFF file or a disconnected tool. The withheld price and legal
+          segments are visible in context, which is where a reviewer catches them.</p>
+      </div>
       <div class="card">
         <span class="tag">In-editor panel</span>
         <h3>Status where the author already is</h3>
@@ -571,7 +597,8 @@
         <span class="tag">Overlap · in editor</span>
         <h3>Single page: both, together</h3>
         <p>The author is on the canvas. Translating and localizing one page is a single continuous act, so
-          keep them together here. The in-editor panel is this zone's home.</p>
+          keep them together here. The in-editor panel and live side-by-side preview both live in this zone;
+          the bulk zones work from status and coverage rather than per-page preview.</p>
       </div>
       <div class="card">
         <span class="tag">Left</span>
