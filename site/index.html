@@ -117,6 +117,14 @@
   .spectrum-Table { margin-top: 22px; }
   .spectrum-Table-cell .sub { display: block; font-size: 12.5px; color: var(--mmuted); margin-top: 2px; font-weight: 400; }
 
+  /* Quiet status labels (tinted, not solid) so they read as metadata, not buttons. */
+  .mrd-tag { display: inline-block; font-size: 11px; font-weight: 700; letter-spacing: .02em; padding: 1px 8px; border-radius: 4px; vertical-align: middle; }
+  .mrd-tag.blue { background: var(--msoft); color: var(--maccent); }
+  .mrd-tag.orange { background: var(--warn-soft); color: var(--warn); }
+  .mrd-tag.red { background: var(--crit-soft); color: var(--crit); }
+  .mrd-tag.green { background: var(--good-soft); color: var(--good); }
+  .mrd-tag.gray { background: var(--spectrum-gray-200); color: var(--mmuted); }
+
   /* layer stack */
   .stack { margin-top: 22px; display: flex; flex-direction: column; gap: 8px; }
   .layer { display: grid; grid-template-columns: 185px 1fr; gap: 14px; align-items: start; background: var(--msurface); border: 1px solid var(--mline); border-radius: var(--radius-s); padding: 14px 18px; --layer-c: var(--mmuted); }
@@ -324,22 +332,22 @@
           <small>Edited once. Every market inherits from here unless a layer overrides.</small></div>
       </div>
       <div class="layer lang">
-        <div class="lname">Language <span class="spectrum-Badge spectrum-Badge--sizeS spectrum-Badge--informative">machine</span></div>
+        <div class="lname">Language <span class="mrd-tag blue">machine</span></div>
         <div class="ldesc">Hero heading + CTA machine-translated to Spanish; high confidence, auto-applied.
           <small>If confidence were low, it would route to Approvals instead of publishing.</small></div>
       </div>
       <div class="layer commercial">
-        <div class="lname">Commercial <span class="spectrum-Badge spectrum-Badge--sizeS spectrum-Badge--notice">human</span></div>
+        <div class="lname">Commercial <span class="mrd-tag orange">human</span></div>
         <div class="ldesc">The offer price is overridden for the Mexican market (currency, amount, terms).
           <small>Withheld from the machine. A person sets it; the number is never machine-translated.</small></div>
       </div>
       <div class="layer compliance">
-        <div class="lname">Compliance <span class="spectrum-Badge spectrum-Badge--sizeS spectrum-Badge--negative">human · gated</span></div>
+        <div class="lname">Compliance <span class="mrd-tag red">human · gated</span></div>
         <div class="ldesc">The legal disclosure is the locally required Spanish version, owned by legal.
           <small>Detected present or absent, never scored, never machine-authored. Absent = publish blocked.</small></div>
       </div>
       <div class="layer structural">
-        <div class="lname">Structural <span class="spectrum-Badge spectrum-Badge--sizeS spectrum-Badge--neutral">optional</span></div>
+        <div class="lname">Structural <span class="mrd-tag gray">optional</span></div>
         <div class="ldesc">A market may fork layout (add or drop a block) when it genuinely differs.
           <small>An explicit escape hatch; a forked block stops tracking canonical by design.</small></div>
       </div>
@@ -404,8 +412,8 @@
         <span class="tag">Dashboard</span>
         <h3 class="spectrum-Heading spectrum-Heading--sizeS">Coverage at a glance</h3>
         <p class="spectrum-Body spectrum-Body--sizeS">Every page × market in one matrix: stage
-          (<span class="spectrum-Badge spectrum-Badge--sizeS spectrum-Badge--positive">live</span>
-          <span class="spectrum-Badge spectrum-Badge--sizeS spectrum-Badge--notice">staged</span> none) and
+          (<span class="mrd-tag green">live</span>
+          <span class="mrd-tag blue">staged</span> none) and
           freshness (current / stale / missing).</p>
         <p class="why"><b>RFP driver:</b> "show me what's translated and what's out of date." <b>Others:</b>
           MSM has a rollout report but no freshness-vs-source at a glance.</p>
