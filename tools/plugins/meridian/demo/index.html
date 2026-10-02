@@ -1,0 +1,93 @@
+<!--
+ Copyright 2026 Adobe Systems Incorporated
+
+ Licensed under the Apache License, Version 2.0 (the "License");
+ you may not use this file except in compliance with the License.
+ You may obtain a copy of the License at
+
+     http://www.apache.org/licenses/LICENSE-2.0
+
+ Unless required by applicable law or agreed to in writing, software
+ distributed under the License is distributed on an "AS IS" BASIS,
+ WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ See the License for the specific language governing permissions and
+ limitations under the License.
+-->
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <title>Meridian — In-editor panel</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1"/>
+    <link rel="icon" href="data:,">
+    <script type="importmap">
+      { "imports": { "da-lit": "../../../deps/lit/dist/index.js" } }
+    </script>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Source+Sans+3:wght@400;600;700&display=swap">
+    <link rel="stylesheet" href="https://da.live/nx/styles/nexter.css">
+    <style>
+      :root { --ew-font: "Adobe Clean", "Source Sans 3", -apple-system, system-ui, sans-serif; }
+      html, body { height: 100%; margin: 0; }
+      body { display: flex; flex-direction: column; font-family: var(--ew-font); background: #f4f4f4; color: #222; }
+      .ew-bar {
+        display: flex; align-items: center; gap: 12px; padding: 10px 16px;
+        background: #fff; border-bottom: 1px solid #e1e1e1; font-size: 14px; font-weight: 600;
+      }
+      .ew-bar .dot { width: 14px; height: 14px; border-radius: 4px; background: #2680eb; }
+      .ew-bar .concept {
+        margin-left: auto; font-size: 11px; font-weight: 700; letter-spacing: .04em; text-transform: uppercase;
+        color: #6d6d6d; background: #f0f0f0; padding: 3px 10px; border-radius: 999px;
+      }
+      .ew-body { flex: 1; display: flex; min-height: 0; }
+      .ew-canvas { flex: 1; padding: 40px clamp(20px, 6vw, 72px); overflow: auto; }
+      .ew-canvas .doc { max-width: 720px; }
+      .ew-canvas h1 { font-size: 34px; margin: 0 0 8px; }
+      .ew-canvas h2 { font-size: 22px; margin: 28px 0 6px; }
+      .ew-canvas p { color: #4b4b4b; line-height: 1.6; max-width: 60ch; }
+      .ew-canvas .ph { height: 12px; border-radius: 4px; background: #e6e6e6; margin: 10px 0; }
+      .ew-canvas .ph.w70 { width: 70%; } .ew-canvas .ph.w50 { width: 50%; }
+      .ew-panel {
+        flex: none; width: 380px; max-width: 46vw; background: #fff; border-left: 1px solid #e1e1e1;
+        display: flex; flex-direction: column; overflow: auto;
+      }
+      .ew-panel-head {
+        display: flex; align-items: center; gap: 9px; padding: 12px 16px; border-bottom: 1px solid #e1e1e1;
+        font-weight: 700; font-size: 14px;
+      }
+      .ew-panel-head .dot { width: 13px; height: 13px; border-radius: 4px; background: #2680eb; }
+      #mrd-panel-slot { padding: 6px 4px; }
+      @media (max-width: 720px) {
+        .ew-body { flex-direction: column; }
+        .ew-panel { width: auto; max-width: none; border-left: 0; border-top: 1px solid #e1e1e1; }
+      }
+    </style>
+    <script src="boot.js" type="module"></script>
+  </head>
+  <body>
+    <div class="ew-bar">
+      <span class="dot"></span>
+      Experience Workspace — editing <span style="font-weight:400">&nbsp;/personal-banking</span>
+      <span class="concept">Concept preview</span>
+    </div>
+    <div class="ew-body">
+      <div class="ew-canvas">
+        <div class="doc">
+          <h1>Personal Banking</h1>
+          <p>Everyday banking made simple.</p>
+          <div class="ph w70"></div><div class="ph"></div><div class="ph w50"></div>
+          <h2>Checking Accounts</h2>
+          <p>Access your money anywhere.</p>
+          <div class="ph"></div><div class="ph w70"></div>
+          <h2>Savings Accounts</h2>
+          <p>Save for what matters.</p>
+          <div class="ph w50"></div>
+        </div>
+      </div>
+      <aside class="ew-panel">
+        <div class="ew-panel-head"><span class="dot"></span> Meridian</div>
+        <div id="mrd-panel-slot"></div>
+      </aside>
+    </div>
+  </body>
+</html>

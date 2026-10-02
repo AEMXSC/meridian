@@ -155,6 +155,20 @@ class DaMeridian extends LitElement {
 customElements.define('da-meridian', DaMeridian);
 
 (async function init() {
+  // DEMO: the GitHub Pages concept preview pre-installs an in-memory DA (via
+  // setDaFetch) + a fake context before this module loads, so skip DA_SDK and
+  // render into the provided slot. No-op in production (flag unset).
+  const demo = typeof window !== 'undefined' ? window.__MERIDIAN_DEMO__ : null;
+  if (demo && demo.context) {
+    const cmp = document.createElement('da-meridian');
+    cmp.details = {
+      org: demo.context.org,
+      site: demo.context.site,
+      path: (demo.details && demo.details.path) || demo.context.path,
+    };
+    (document.getElementById('mrd-panel-slot') || document.body).append(cmp);
+    return;
+  }
   try {
     const { context, actions } = await DA_SDK;
     setDaFetch(actions.daFetch);
