@@ -1,0 +1,646 @@
+<!--
+ Copyright 2026 Adobe Systems Incorporated
+
+ Licensed under the Apache License, Version 2.0 (the "License");
+ you may not use this file except in compliance with the License.
+ You may obtain a copy of the License at
+
+     http://www.apache.org/licenses/LICENSE-2.0
+
+ Unless required by applicable law or agreed to in writing, software
+ distributed under the License is distributed on an "AS IS" BASIS,
+ WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ See the License for the specific language governing permissions and
+ limitations under the License.
+-->
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Meridian Localization</title>
+<meta name="description" content="What Meridian does, where it came from in the AEM RFP data, and the IA + use cases for the DA translation/localization redesign.">
+<link rel="icon" href="data:,">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wght@500;600;700;800&family=Source+Serif+4:opsz,wght@8..60,400;8..60,500;8..60,600&family=IBM+Plex+Mono:wght@400;500;600&display=swap">
+<style>
+  /* Layout: one reading column on a cool neutral ground; mono eyebrows, serif body, grotesk display. */
+  :root {
+    --bg: #f4f6f8;
+    --surface: #ffffff;
+    --surface-2: #eef1f4;
+    --fg: #191c22;
+    --muted: #5b6572;
+    --line: #d7dde4;
+    --accent: #2b4fd0;
+    --accent-soft: #e5ebfb;
+    --good: #1a7f52;
+    --warn: #a86406;
+    --crit: #c23a2f;
+    --good-soft: #e2f3ea;
+    --warn-soft: #f6ecda;
+    --crit-soft: #f8e5e3;
+    --display: 'Archivo', system-ui, sans-serif;
+    --body: 'Source Serif 4', Georgia, serif;
+    --mono: 'IBM Plex Mono', ui-monospace, monospace;
+    color-scheme: light;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #101319;
+      --surface: #171b22;
+      --surface-2: #1f242d;
+      --fg: #e7eaef;
+      --muted: #9aa5b2;
+      --line: #2b313b;
+      --accent: #879cf2;
+      --accent-soft: #1d2740;
+      --good: #4cc08a;
+      --warn: #d69a3e;
+      --crit: #e8766b;
+      --good-soft: #152a20;
+      --warn-soft: #2c2412;
+      --crit-soft: #2e1a18;
+      color-scheme: dark;
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #101319;
+    --surface: #171b22;
+    --surface-2: #1f242d;
+    --fg: #e7eaef;
+    --muted: #9aa5b2;
+    --line: #2b313b;
+    --accent: #879cf2;
+    --accent-soft: #1d2740;
+    --good: #4cc08a;
+    --warn: #d69a3e;
+    --crit: #e8766b;
+    --good-soft: #152a20;
+    --warn-soft: #2c2412;
+    --crit-soft: #2e1a18;
+    color-scheme: dark;
+  }
+
+  * { box-sizing: border-box; }
+  html, body { margin: 0; }
+  body {
+    background: var(--bg);
+    color: var(--fg);
+    font-family: var(--body);
+    font-size: 17px;
+    line-height: 1.6;
+    -webkit-font-smoothing: antialiased;
+  }
+  h1, h2, h3, h4 { font-family: var(--display); line-height: 1.15; text-wrap: balance; margin: 0; }
+  a { color: var(--accent); }
+  p { margin: 0 0 1em; }
+
+  .eyebrow {
+    font-family: var(--mono); font-size: 12px; font-weight: 600;
+    letter-spacing: .12em; text-transform: uppercase; color: var(--accent);
+    margin: 0 0 .6em;
+  }
+
+  /* top bar */
+  .bar {
+    position: sticky; top: env(safe-area-inset-top, 0px); z-index: 20;
+    background: color-mix(in srgb, var(--bg) 88%, transparent);
+    backdrop-filter: blur(8px);
+    border-bottom: 1px solid var(--line);
+  }
+  .bar-in {
+    max-width: 1060px; margin: 0 auto; padding: 10px 20px;
+    display: flex; align-items: center; gap: 18px;
+  }
+  .brand { font-family: var(--display); font-weight: 800; letter-spacing: -.01em; font-size: 18px; }
+  .brand span { color: var(--accent); }
+  .bar nav { display: flex; gap: 16px; margin-left: auto; flex-wrap: wrap; }
+  .bar nav a { font-family: var(--mono); font-size: 12.5px; color: var(--muted); text-decoration: none; }
+  .bar nav a:hover { color: var(--fg); }
+  .theme-btn {
+    font-family: var(--mono); font-size: 12px; cursor: pointer;
+    background: var(--surface-2); color: var(--fg); border: 1px solid var(--line);
+    border-radius: 6px; padding: 5px 9px;
+  }
+  @media (max-width: 760px) { .bar nav { display: none; } }
+
+  .wrap { max-width: 1060px; margin: 0 auto; padding-inline: 20px; }
+  section { padding-block: 44px; border-bottom: 1px solid var(--line); scroll-margin-top: 64px; }
+  section:last-of-type { border-bottom: 0; }
+
+  /* hero */
+  .hero { padding-block: 56px 48px; }
+  .hero h1 { font-size: clamp(32px, 5.2vw, 52px); font-weight: 800; letter-spacing: -.02em; max-width: 16ch; }
+  .lede { font-size: clamp(18px, 2.2vw, 22px); color: var(--muted); max-width: 60ch; margin-top: 18px; }
+  .meta { font-family: var(--mono); font-size: 12.5px; color: var(--muted); margin-top: 22px; display: flex; gap: 14px; flex-wrap: wrap; }
+  .meta span { white-space: nowrap; }
+  .cta-row { margin-top: 26px; display: flex; gap: 12px; flex-wrap: wrap; }
+  .btn {
+    font-family: var(--display); font-weight: 600; font-size: 15px; text-decoration: none;
+    padding: 11px 18px; border-radius: 8px; display: inline-flex; align-items: center; gap: 8px;
+  }
+  .btn-primary { background: var(--accent); color: #fff; }
+  .btn-ghost { background: transparent; color: var(--fg); border: 1px solid var(--line); }
+
+  h2 { font-size: clamp(24px, 3.4vw, 32px); font-weight: 700; letter-spacing: -.01em; }
+  .section-intro { color: var(--muted); max-width: 64ch; margin-top: 10px; }
+  h3 { font-size: 20px; font-weight: 700; margin-top: 28px; }
+
+  .grid { display: grid; gap: 16px; margin-top: 24px; }
+  .cols-2 { grid-template-columns: repeat(2, 1fr); }
+  .cols-3 { grid-template-columns: repeat(3, 1fr); }
+  @media (max-width: 820px) { .cols-2, .cols-3 { grid-template-columns: 1fr; } }
+
+  .card {
+    background: var(--surface); border: 1px solid var(--line); border-radius: 10px;
+    padding: 20px 22px;
+  }
+  .card h3 { margin-top: 0; }
+  .card .tag {
+    font-family: var(--mono); font-size: 11px; font-weight: 600; letter-spacing: .08em;
+    text-transform: uppercase; color: var(--muted);
+  }
+  .card p { font-size: 15.5px; margin-bottom: .7em; }
+  .why { font-size: 14.5px; color: var(--muted); border-top: 1px dashed var(--line); padding-top: 12px; margin-top: 4px; }
+  .why b { color: var(--fg); font-family: var(--display); font-weight: 600; }
+
+  /* chips */
+  .chip {
+    font-family: var(--mono); font-size: 11.5px; font-weight: 600; padding: 2px 8px;
+    border-radius: 999px; white-space: nowrap; display: inline-block;
+  }
+  .chip-good { background: var(--good-soft); color: var(--good); }
+  .chip-warn { background: var(--warn-soft); color: var(--warn); }
+  .chip-crit { background: var(--crit-soft); color: var(--crit); }
+  .chip-accent { background: var(--accent-soft); color: var(--accent); }
+
+  /* tables */
+  .table-scroll { overflow-x: auto; margin-top: 24px; border: 1px solid var(--line); border-radius: 10px; }
+  table { border-collapse: collapse; width: 100%; min-width: 640px; font-size: 14.5px; }
+  th, td { text-align: left; padding: 11px 14px; border-bottom: 1px solid var(--line); vertical-align: top; }
+  thead th { font-family: var(--mono); font-size: 11.5px; letter-spacing: .06em; text-transform: uppercase; color: var(--muted); background: var(--surface-2); }
+  tbody tr:last-child td { border-bottom: 0; }
+  td.feat { font-family: var(--display); font-weight: 600; }
+  .yes { color: var(--good); font-weight: 600; }
+  .partial { color: var(--warn); font-weight: 600; }
+  .no { color: var(--muted); }
+  .em { background: color-mix(in srgb, var(--accent-soft) 60%, transparent); }
+
+  /* layer stack worked example */
+  .stack { margin-top: 22px; display: flex; flex-direction: column; gap: 8px; }
+  .layer {
+    display: grid; grid-template-columns: 170px 1fr; gap: 14px; align-items: start;
+    background: var(--surface); border: 1px solid var(--line);
+    border-radius: 8px; padding: 12px 16px; --layer-c: var(--muted);
+  }
+  .layer .lname { font-family: var(--mono); font-size: 12.5px; font-weight: 600; }
+  .layer .lname::before {
+    content: ""; display: inline-block; width: 9px; height: 9px; border-radius: 2px;
+    background: var(--layer-c); margin-right: 8px; vertical-align: baseline;
+  }
+  .layer .ldesc { font-size: 14.5px; }
+  .layer .ldesc small { color: var(--muted); display: block; margin-top: 2px; font-size: 13px; }
+  .layer.canon { --layer-c: var(--muted); }
+  .layer.lang { --layer-c: var(--accent); }
+  .layer.commercial { --layer-c: var(--warn); }
+  .layer.compliance { --layer-c: var(--crit); }
+  .layer.structural { --layer-c: var(--good); }
+  @media (max-width: 620px) { .layer { grid-template-columns: 1fr; gap: 4px; } }
+
+  /* venn */
+  .venn-wrap { margin-top: 24px; background: var(--surface); border: 1px solid var(--line); border-radius: 10px; padding: 18px; }
+  .venn-wrap svg { width: 100%; height: auto; display: block; }
+  .venn-cap { font-family: var(--mono); font-size: 12px; color: var(--muted); margin-top: 10px; text-align: center; }
+
+  /* use cases */
+  .uc { background: var(--surface); border: 1px solid var(--line); border-radius: 10px; padding: 18px 20px; }
+  .uc .zone { font-family: var(--mono); font-size: 11px; font-weight: 600; letter-spacing: .08em; text-transform: uppercase; }
+  .uc h4 { font-size: 17px; margin: 6px 0 10px; }
+  .uc dl { margin: 0; display: grid; grid-template-columns: 92px 1fr; gap: 6px 12px; font-size: 14.5px; }
+  .uc dt { font-family: var(--mono); font-size: 11px; font-weight: 600; letter-spacing: .05em; text-transform: uppercase; color: var(--muted); padding-top: 2px; }
+  .uc dd { margin: 0; }
+
+  .callout {
+    margin-top: 24px; background: var(--accent-soft); border: 1px solid color-mix(in srgb, var(--accent) 30%, var(--line));
+    border-radius: 10px; padding: 20px 22px;
+  }
+  .callout h3 { margin-top: 0; }
+  .callout p { font-size: 15.5px; }
+
+  ul.clean { margin: 16px 0 0; padding-left: 0; list-style: none; display: grid; gap: 10px; }
+  ul.clean li { padding-left: 22px; position: relative; font-size: 15.5px; }
+  ul.clean li::before { content: "→"; position: absolute; left: 0; color: var(--accent); font-family: var(--mono); }
+
+  .q-list { counter-reset: q; margin-top: 20px; display: grid; gap: 12px; }
+  .q-list .q { background: var(--surface); border: 1px solid var(--line); border-radius: 8px; padding: 14px 16px 14px 48px; position: relative; font-size: 15.5px; }
+  .q-list .q::before {
+    counter-increment: q; content: "Q" counter(q);
+    position: absolute; left: 14px; top: 13px; font-family: var(--mono); font-size: 12px; font-weight: 600; color: var(--accent);
+  }
+
+  footer { padding: 32px 20px 56px; max-width: 1060px; margin: 0 auto; color: var(--muted); font-family: var(--mono); font-size: 12.5px; }
+
+  .note { font-size: 14px; color: var(--muted); font-style: italic; }
+</style>
+</head>
+<body>
+
+<div class="bar">
+  <div class="bar-in">
+    <div class="brand">Meri<span>dian</span></div>
+    <nav>
+      <a href="#why">Why it exists</a>
+      <a href="#model">The model</a>
+      <a href="#market-rules">Market Rules</a>
+      <a href="#surfaces">Surfaces</a>
+      <a href="#ia">IA &amp; use cases</a>
+      <a href="#prototype">Prototype</a>
+    </nav>
+    <button class="theme-btn" id="themeBtn" aria-label="Toggle theme">◐ theme</button>
+  </div>
+</div>
+
+<div class="wrap">
+
+  <header class="hero">
+    <p class="eyebrow">For the DA UX &amp; engineering team</p>
+    <h1>Reimagining translation &amp; localization in Document Authoring</h1>
+    <p class="lede">
+      A runthrough of the Meridian prototype: what it does, where each piece came from in the
+      AEM RFP data and the competitive landscape, and a proposed information architecture to design against.
+    </p>
+    <div class="meta">
+      <span>From: Courtney Remekie · AEM XSC presales</span>
+      <span>Audience: UX + engineering</span>
+      <span>Status: working prototype, open for design</span>
+    </div>
+    <div class="cta-row">
+      <a class="btn btn-primary" href="tools/apps/meridian/demo/">Open the working prototype →</a>
+      <a class="btn btn-ghost" href="#ia">Jump to IA &amp; use cases</a>
+    </div>
+  </header>
+
+  <!-- WHY -->
+  <section id="why">
+    <p class="eyebrow">Where this came from</p>
+    <h2>The #1 AEM RFP requirement, and today it's the weakest surface</h2>
+    <p class="section-intro">
+      We reviewed 70+ AEM RFPs across 2026 Q1–Q4. In almost every one, translation / multi-site
+      management / localization is a top requirement. In DA + Experience Workspace today that flow is
+      poor. In a field working session we mapped nine concrete gaps against real customer requirements;
+      Meridian is the prototype that answers them, built DA-native so it rides the edge platform rather
+      than bolting a separate system beside it.
+    </p>
+
+    <h3>How the alternatives actually solve this</h3>
+    <div class="table-scroll">
+      <table>
+        <thead>
+          <tr>
+            <th>Capability</th>
+            <th class="em">Meridian</th>
+            <th>Enterprise TMS<br><span style="font-weight:400;text-transform:none;letter-spacing:0">(Smartling, Phrase…)</span></th>
+            <th>AEM MSM</th>
+            <th>DA today</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr><td class="feat">Machine translation</td><td class="em yes">✓</td><td class="yes">✓ mature</td><td class="partial">~ via connector</td><td class="partial">~ basic</td></tr>
+          <tr><td class="feat">Works in place on the live page<br><span class="note">no XLIFF export/import round-trip</span></td><td class="em yes">✓</td><td class="no">✕ file round-trip</td><td class="partial">~ in-AEM</td><td class="partial">~ manual</td></tr>
+          <tr><td class="feat">Inherit by default<br><span class="note">edit one market, the rest stay in sync</span></td><td class="em yes">✓</td><td class="no">✕</td><td class="partial">~ "break the link" then it stops inheriting</td><td class="no">✕</td></tr>
+          <tr><td class="feat">Price &amp; legal stay human-owned<br><span class="note">a machine never authors them</span></td><td class="em yes">✓ enforced</td><td class="no">✕ translated like any text</td><td class="no">✕</td><td class="no">✕</td></tr>
+          <tr><td class="feat">Exposure radar<br><span class="note">stale / missing / drift, before someone complains</span></td><td class="em yes">✓</td><td class="no">✕</td><td class="partial">~ rollout report</td><td class="no">✕</td></tr>
+          <tr><td class="feat">Per-market SEO slug<br><span class="note">/es/financiacion, not /es/financing</span></td><td class="em yes">✓</td><td class="partial">~ varies</td><td class="no">✕ keeps source path</td><td class="no">✕</td></tr>
+          <tr><td class="feat">Native to EDS / DA<br><span class="note">git-backed, no new system to run</span></td><td class="em yes">✓</td><td class="no">✕ external platform</td><td class="no">✕ AEM classic</td><td class="yes">✓ baseline</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <p class="note" style="margin-top:14px">
+      Honest read: enterprise TMS still wins on raw translation breadth (100+ languages, mature TM/glossary,
+      project management) and scored highest in our teardown. Meridian isn't trying to out-translate them.
+      It wins by being native to the edge platform, governing what's market-specific vs inherited, and
+      surfacing exposure, so the content stays correct without a separate system.
+    </p>
+  </section>
+
+  <!-- MODEL -->
+  <section id="model">
+    <p class="eyebrow">The one idea everything rests on</p>
+    <h2>One canonical page, typed market layers, variants computed fresh</h2>
+    <p class="section-intro">
+      Instead of copying a master and rolling out edits (and losing them on the next rollout), Meridian
+      keeps <b>one canonical content object</b> per page and a stack of <b>typed adaptation layers</b> per
+      market. The market page a visitor sees is a <b>derived variant</b>: computed from canonical + layers,
+      never hand-maintained. Delete it, recompute, get byte-identical output.
+    </p>
+
+    <div class="grid cols-2">
+      <div class="card">
+        <span class="tag">Translate</span>
+        <h3>Machine work, language layer only</h3>
+        <p>Takes the English page's language content and machine-translates it. Clean results publish;
+          low-confidence ones are held for a human. It scales: one action across many pages and markets.</p>
+        <p class="why"><b>Think:</b> fast, automatic, reversible. The machine's job.</p>
+      </div>
+      <div class="card">
+        <span class="tag">Localize</span>
+        <h3>Translate + human-owned market content</h3>
+        <p>Everything translate does, plus the segments a machine must never author on its own: price,
+          offers, and legal / compliance. Those are withheld from the machine and authored or signed off
+          by a person, per market.</p>
+        <p class="why"><b>Think:</b> translation is a subset of localization. The human's job sits on top.</p>
+      </div>
+    </div>
+    <p style="margin-top:20px"><b>Why this split matters for the UX:</b> it's the reason the surfaces diverge
+      later. Translate bulks cleanly. The human parts of localize do not bulk the same way, and that's the
+      crux of Jiawei's diagram below.</p>
+  </section>
+
+  <!-- MARKET RULES -->
+  <section id="market-rules">
+    <p class="eyebrow">The part worth the most time</p>
+    <h2>Market Rules: the typed layer stack</h2>
+    <p class="section-intro">
+      This is the real differentiator and the least self-evident surface, so it's worth a worked example.
+      Each market is a set of <b>typed layers</b> applied over the canonical page in a fixed precedence. A
+      block with <b>no layer entry is inherited</b>: it tracks the canonical and updates automatically. A
+      block with an entry <b>holds the market's own value</b>. That's how "change one thing for Spain and
+      keep everything else in sync" works without MSM's break-the-link problem.
+    </p>
+
+    <h3>Worked example: a "Spring Refresh" offer page in Spanish (es-MX)</h3>
+    <div class="stack">
+      <div class="layer canon">
+        <div class="lname">Canonical</div>
+        <div class="ldesc">The English source of truth: hero, offer price, legal block.
+          <small>Edited once. Every market inherits from here unless a layer overrides.</small></div>
+      </div>
+      <div class="layer lang">
+        <div class="lname">Language <span class="chip chip-accent">machine</span></div>
+        <div class="ldesc">Hero heading + CTA machine-translated to Spanish; high confidence, auto-applied.
+          <small>If confidence were low, it would route to Approvals instead of publishing.</small></div>
+      </div>
+      <div class="layer commercial">
+        <div class="lname">Commercial <span class="chip chip-warn">human</span></div>
+        <div class="ldesc">The offer price is overridden for the Mexican market (currency, amount, terms).
+          <small>Withheld from the machine. A person sets it; the number is never machine-translated.</small></div>
+      </div>
+      <div class="layer compliance">
+        <div class="lname">Compliance <span class="chip chip-crit">human · gated</span></div>
+        <div class="ldesc">The legal disclosure is the locally required Spanish version, owned by legal.
+          <small>Detected present or absent, never scored, never machine-authored. Absent = publish blocked.</small></div>
+      </div>
+      <div class="layer structural">
+        <div class="lname">Structural <span class="chip chip-good">optional</span></div>
+        <div class="ldesc">A market may fork layout (add or drop a block) when it genuinely differs.
+          <small>An explicit escape hatch; a forked block stops tracking canonical by design.</small></div>
+      </div>
+    </div>
+    <p style="margin-top:20px">
+      Everything not named above stays inherited. Edit the canonical hero image next week and every market
+      picks it up automatically, while Mexico keeps its own price and legal text. That inheritance model is
+      what the Market Rules UI has to make legible: for any page and market, which blocks are inherited,
+      which are held, and by whom (machine vs human vs legal).
+    </p>
+    <div class="callout">
+      <h3>The rule that constrains the design</h3>
+      <p style="margin-bottom:0">A machine never authors commercial or compliance content, not even as a
+        suggestion. Compliance is only ever detected present or absent. This isn't a nice-to-have: it's what
+        makes Meridian safe for regulated industries (banking, pharma, insurance) that dominate the RFP set,
+        and it's why "localize" always has a human in the loop.</p>
+    </div>
+  </section>
+
+  <!-- SURFACES -->
+  <section id="surfaces">
+    <p class="eyebrow">The rest of the app, in brief</p>
+    <h2>The supporting surfaces</h2>
+    <p class="section-intro">These three are largely self-explanatory in the prototype, so the short version:</p>
+
+    <div class="grid cols-3">
+      <div class="card">
+        <span class="tag">Dashboard</span>
+        <h3>Coverage at a glance</h3>
+        <p>Every page × market in one matrix: stage
+          (<span class="chip chip-good">live</span> <span class="chip chip-warn">staged</span> none) and
+          freshness (current / stale / missing).</p>
+        <p class="why"><b>RFP driver:</b> "show me what's translated and what's out of date." <b>Others:</b>
+          MSM has a rollout report but no freshness-vs-source at a glance.</p>
+      </div>
+      <div class="card">
+        <span class="tag">Issues</span>
+        <h3>Where you're exposed</h3>
+        <p>A read-only radar of five finding types: stale, missing-required compliance, drift across markets,
+          uncovered market, coverage gaps.</p>
+        <p class="why"><b>RFP driver:</b> regulatory risk and "which markets are behind." <b>Others:</b> you
+          normally find out when legal or a regional team complains.</p>
+      </div>
+      <div class="card">
+        <span class="tag">Approvals</span>
+        <h3>Human-in-the-loop gate</h3>
+        <p>Clean translations auto-publish; low-confidence ones queue here; compliance-absent is a hard block.
+          Approve, or reject with a reason.</p>
+        <p class="why"><b>RFP driver:</b> governance and sign-off. <b>Others:</b> TMS review steps are
+          heavyweight; MSM and DA have none.</p>
+      </div>
+    </div>
+
+    <div class="grid cols-2" style="margin-top:16px">
+      <div class="card">
+        <span class="tag">In-editor panel</span>
+        <h3>Status where the author already is</h3>
+        <p>Inside the DA editor, a reference panel shows where the current page lives in every market
+          (live / staged / not localized) and deep-links into Meridian pre-scoped, so the author never
+          re-enters context. The AEM "references" sidebar, reimagined for EDS.</p>
+      </div>
+      <div class="card">
+        <span class="tag">SEO</span>
+        <h3>Translated page slugs</h3>
+        <p>Localized pages can publish at a translated URL (<code>/es/financiacion</code>, not
+          <code>/es/financing</code>), with hreflang kept consistent. A concrete SEO win MSM doesn't give
+          you, and a frequent RFP line item.</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- IA & USE CASES -->
+  <section id="ia">
+    <p class="eyebrow">Answering your questions</p>
+    <h2>Information architecture &amp; the go-to use cases</h2>
+    <p class="section-intro">
+      Starting from Jiawei's model. It maps almost exactly onto how the prototype already splits, so it's a
+      strong base. The one thing worth resolving is the right-hand circle.
+    </p>
+
+    <div class="venn-wrap">
+      <svg viewBox="0 0 760 460" role="img" aria-label="Venn diagram: Translation and Localization circles overlapping; overlap is single-page translate and localize; outer regions are multi-page translate and multi-page localize.">
+        <circle cx="285" cy="235" r="205" fill="color-mix(in srgb, var(--accent) 8%, transparent)" stroke="var(--fg)" stroke-width="2"></circle>
+        <circle cx="475" cy="235" r="205" fill="color-mix(in srgb, var(--accent) 8%, transparent)" stroke="var(--fg)" stroke-width="2"></circle>
+        <text x="215" y="110" text-anchor="middle" font-family="IBM Plex Mono, monospace" font-size="17" font-weight="600" fill="var(--fg)">Multi Page Translate</text>
+        <text x="545" y="110" text-anchor="middle" font-family="IBM Plex Mono, monospace" font-size="17" font-weight="600" fill="var(--fg)">Multi Page Localize</text>
+        <text x="175" y="245" text-anchor="middle" font-family="Archivo, sans-serif" font-size="26" font-weight="700" fill="var(--fg)">Translation</text>
+        <text x="585" y="245" text-anchor="middle" font-family="Archivo, sans-serif" font-size="26" font-weight="700" fill="var(--fg)">Localization</text>
+        <text x="380" y="212" text-anchor="middle" font-family="Archivo, sans-serif" font-size="18" font-weight="700" fill="var(--fg)">Single Page</text>
+        <text x="380" y="238" text-anchor="middle" font-family="Archivo, sans-serif" font-size="18" font-weight="700" fill="var(--fg)">Translate &amp;</text>
+        <text x="380" y="264" text-anchor="middle" font-family="Archivo, sans-serif" font-size="18" font-weight="700" fill="var(--fg)">Localize</text>
+      </svg>
+      <p class="venn-cap">Jiawei's model, redrawn. Three zones, one per use-case cluster.</p>
+    </div>
+
+    <h3>The three zones, and what each is for</h3>
+    <div class="grid cols-3" style="margin-top:16px">
+      <div class="card">
+        <span class="tag">Overlap · in editor</span>
+        <h3>Single page: both, together</h3>
+        <p>The author is on the canvas. Translating and localizing one page is a single continuous act, so
+          keep them together here. The in-editor panel is this zone's home.</p>
+      </div>
+      <div class="card">
+        <span class="tag">Left</span>
+        <h3>Multi-page translate</h3>
+        <p>The machine pass at scale: many pages × many markets in one action. Clean results publish, the rest
+          go to Approvals. This zone bulks naturally.</p>
+      </div>
+      <div class="card">
+        <span class="tag">Right · the contested one</span>
+        <h3>Multi-page localize</h3>
+        <p>Not bulk-authoring legal and price across 40 pages. It's the human-governed pass at scale:
+          set a market's rules once, then work a review queue + coverage view.</p>
+      </div>
+    </div>
+
+    <div class="callout">
+      <h3>Why "multi-page localize" isn't the opposite of translate</h3>
+      <p>Silvia's instinct was right to question it. If "localize 40 pages" meant a machine writing 40 pages
+        of legal and pricing, it would either break the no-machine-authored-compliance rule or leave 40
+        unfinished drafts. So that's not what it is. Multi-page localize is two real jobs:</p>
+      <p style="margin-bottom:0"><b>1. Set the market's rules once:</b> glossary, do-not-translate terms,
+        required compliance blocks, price and date formats. These apply to <em>every</em> page translated
+        into that market, so the human effort is defined once and inherited everywhere.
+        <b>2. Work the queue + coverage:</b> a portfolio view of every page × market with its status, where a
+        reviewer opens an item, authors or approves its commercial / compliance, and promotes to live.
+        The scale is in the governance and the queue, not in machine-authoring.</p>
+    </div>
+
+    <h3>Go-to use cases to design against</h3>
+    <div class="grid cols-2" style="margin-top:16px">
+      <div class="uc">
+        <div class="zone" style="color:var(--accent)">Overlap · single page</div>
+        <h4>UC1 · Localize the page I'm editing</h4>
+        <dl>
+          <dt>Actor</dt><dd>Content author, already in the DA editor</dd>
+          <dt>Trigger</dt><dd>Opens Meridian from the page they're on</dd>
+          <dt>Flow</dt><dd>See this page's status per market → pick a market → Translate → review the withheld price/legal segments → author/sign off → publish that market</dd>
+          <dt>Done</dt><dd>That market's page is live and current; the panel shows it green</dd>
+        </dl>
+      </div>
+      <div class="uc">
+        <div class="zone" style="color:var(--accent)">Left · multi-page translate</div>
+        <h4>UC2 · Launch a new market</h4>
+        <dl>
+          <dt>Actor</dt><dd>Localization manager</dd>
+          <dt>Trigger</dt><dd>Adding, say, Spanish to the site</dd>
+          <dt>Flow</dt><dd>Select pages (or whole site) × the new market → bulk translate → clean pages auto-publish with translated slugs → low-confidence pages land in Approvals</dd>
+          <dt>Done</dt><dd>New market live across the selection; exceptions queued</dd>
+        </dl>
+      </div>
+      <div class="uc">
+        <div class="zone" style="color:var(--accent)">Left · multi-page translate</div>
+        <h4>UC3 · Propagate a source change</h4>
+        <dl>
+          <dt>Actor</dt><dd>Author edits the English page</dd>
+          <dt>Trigger</dt><dd>Canonical content changes</dd>
+          <dt>Flow</dt><dd>Issues flags every market now stale → re-translate the changed segments across markets → clean ones republish, the rest queue</dd>
+          <dt>Done</dt><dd>Markets back in sync or explicitly queued</dd>
+        </dl>
+      </div>
+      <div class="uc">
+        <div class="zone" style="color:var(--accent)">Right · multi-page localize</div>
+        <h4>UC4 · Run a market's localization at scale</h4>
+        <dl>
+          <dt>Actor</dt><dd>Localization manager / legal reviewer</dd>
+          <dt>Trigger</dt><dd>Standing ownership of a market</dd>
+          <dt>Flow</dt><dd>Set the market's rules once (glossary, DNT, compliance blocks, formats) → work the coverage view + queue → open each item, author/approve price &amp; legal, promote to live</dd>
+          <dt>Done</dt><dd>Market rules saved; queue cleared; coverage green</dd>
+        </dl>
+      </div>
+    </div>
+
+    <h3>IA recommendation</h3>
+    <ul class="clean">
+      <li><b>Keep single-page translate + localize fused in the editor.</b> One surface, in context, both actions.</li>
+      <li><b>Give multi-page translate its own bulk surface</b> (the Pages view): select, translate, auto-publish clean, queue the rest.</li>
+      <li><b>Split multi-page localize into "market rules" + "queue/coverage,"</b> not a bulk-authoring button. This is the design decision that resolves the contested circle.</li>
+      <li><b>Dashboard, Issues, Approvals are cross-cutting</b> read/act surfaces that serve all three zones; they don't need to live inside a zone.</li>
+    </ul>
+  </section>
+
+  <!-- PROTOTYPE -->
+  <section id="prototype">
+    <p class="eyebrow">Click it, don't just read it</p>
+    <h2>The working prototype</h2>
+    <p class="section-intro">
+      The real app runs here with no login, no IMS, no DA access, so anyone can walk the flow. It's the
+      actual application with seeded sample data; the translations are illustrative, not production MT.
+    </p>
+    <div class="cta-row" style="margin-top:20px">
+      <a class="btn btn-primary" href="tools/apps/meridian/demo/">Open the prototype →</a>
+    </div>
+    <ul class="clean">
+      <li>Walk all five surfaces: Dashboard, Pages, Issues, Approvals, Market Rules.</li>
+      <li>Pick a page → preview → Translate (with a translated slug) → compare source vs localized.</li>
+      <li>Request approval, then approve it in the Approvals tab.</li>
+      <li>Everything you change persists for the session; a refresh resets to the seed.</li>
+    </ul>
+  </section>
+
+  <!-- QUESTIONS + TIMELINE -->
+  <section id="next">
+    <p class="eyebrow">For us to validate with users</p>
+    <h2>Open questions &amp; next steps</h2>
+    <div class="q-list">
+      <div class="q">Do authors expect single-page translate and localize as one fused action, or as two steps they choose between?</div>
+      <div class="q">Is "multi-page localize" primarily a rules-setup surface, a review queue, or both in one place?</div>
+      <div class="q">For bulk translate, should clean results auto-publish, or always stage for a review pass first?</div>
+      <div class="q">What's the right scope selector for bulk work: per-page selection, whole-site, or by section?</div>
+      <div class="q">Where should slug / URL decisions live, and how much should an author control per market?</div>
+    </div>
+    <p style="margin-top:24px">
+      <b>Timeline.</b> Innovation week is next week, so the aim is to land the single-page and
+      multi-page-translate flows (the clearest zones) with the UX team before then, keep multi-page localize
+      in validation, and review the designs with Martin's developers when he's back. GA scope is still open.
+    </p>
+  </section>
+
+</div>
+
+<footer>
+  Meridian · DA-native localization prototype · AEM XSC · built for internal UX + engineering review.
+  The prototype uses seeded sample data and illustrative translations.
+</footer>
+
+<script>
+  (function () {
+    var btn = document.getElementById('themeBtn');
+    var root = document.documentElement;
+    function current() {
+      var set = root.getAttribute('data-theme');
+      if (set) return set;
+      return window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+    }
+    try {
+      var saved = localStorage.getItem('mrd-theme');
+      if (saved) root.setAttribute('data-theme', saved);
+    } catch (e) { /* storage blocked */ }
+    btn.addEventListener('click', function () {
+      var next = current() === 'dark' ? 'light' : 'dark';
+      root.setAttribute('data-theme', next);
+      try { localStorage.setItem('mrd-theme', next); } catch (e) { /* ignore */ }
+    });
+  }());
+</script>
+
+</body>
+</html>

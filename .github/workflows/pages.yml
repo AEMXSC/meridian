@@ -29,13 +29,7 @@ jobs:
         run: |
           mkdir -p _site/tools
           cp -r tools/. _site/tools/
-          cat > _site/index.html <<'HTML'
-          <!doctype html>
-          <meta charset="utf-8">
-          <meta http-equiv="refresh" content="0; url=tools/apps/meridian/demo/">
-          <title>Meridian Demo</title>
-          <a href="tools/apps/meridian/demo/">Open the Meridian demo</a>
-          HTML
+          cp site/index.html _site/index.html
       - uses: actions/configure-pages@v5
         with:
           enablement: true
