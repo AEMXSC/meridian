@@ -446,6 +446,40 @@
       what the Market Rules UI has to make legible: for any page and market, which blocks are inherited,
       which are held, and by whom (machine vs human vs legal).
     </p>
+
+    <h3>What you do in this tab</h3>
+    <p class="section-intro">The four interactions the prototype exposes, and what the design has to support:</p>
+    <div class="grid cols-2">
+      <div class="card">
+        <span class="tag">Author a layer</span>
+        <h3>Add, edit, or remove an override</h3>
+        <p>Set a market's own value on any block, or clear it to fall back to inherited. Every entry records
+          a <b>reason</b> and <b>who made it</b> (machine, author, or legal), so the stack stays auditable.
+          Entries are immutable: a change writes a new version rather than overwriting.</p>
+      </div>
+      <div class="card">
+        <span class="tag">Suggest layer</span>
+        <h3>The assistant proposes, a human confirms</h3>
+        <p>A classifier reads a block and proposes its layer type (language, commercial, compliance,
+          structural). It only ever <b>proposes</b>. Nothing applies until a person accepts it, so the
+          machine never silently reclassifies legal or price content.</p>
+      </div>
+      <div class="card">
+        <span class="tag">Add a market</span>
+        <h3>Describe it, review, activate</h3>
+        <p>Describe the new market in plain language. Meridian proposes a starter policy (which layers it
+          needs), you review and adjust the locale and rules, then <b>Activate</b> writes the policy plus an
+          empty layer set ready to fill. No hand-editing of config files.</p>
+      </div>
+      <div class="card">
+        <span class="tag">Compliance is locked</span>
+        <h3>Human-only, non-publishable until signed off</h3>
+        <p>Compliance entries carry a <b>non-publishable banner</b> and can only be authored by a person.
+          The system can flag that a required compliance block is <em>missing</em>, but it will never write
+          or suggest the content, and it blocks publish until the block is present.</p>
+      </div>
+    </div>
+
     <div class="callout">
       <h3>The rule that constrains the design</h3>
       <p style="margin-bottom:0">A machine never authors commercial or compliance content, not even as a
