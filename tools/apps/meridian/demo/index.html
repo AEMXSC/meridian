@@ -1,0 +1,42 @@
+<!--
+ Copyright 2026 Adobe Systems Incorporated
+
+ Licensed under the Apache License, Version 2.0 (the "License");
+ you may not use this file except in compliance with the License.
+ You may obtain a copy of the License at
+
+     http://www.apache.org/licenses/LICENSE-2.0
+
+ Unless required by applicable law or agreed to in writing, software
+ distributed under the License is distributed on an "AS IS" BASIS,
+ WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ See the License for the specific language governing permissions and
+ limitations under the License.
+-->
+<!DOCTYPE html>
+<html>
+  <head>
+    <title>Meridian — Demo</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1"/>
+    <link rel="icon" href="data:,">
+    <!-- da-lit is vendored in the repo; resolve it relative to this demo page. -->
+    <script type="importmap">
+      { "imports": { "da-lit": "../../../deps/lit/dist/index.js" } }
+    </script>
+    <link rel="stylesheet" href="https://da.live/nx/styles/nexter.css">
+    <style>
+      html { display: flex; } html, body { min-height: 100%; min-width: 100%; }
+      body { display: block; background-color: white; }
+      .mrd-demo-ribbon {
+        position: fixed; top: 0; right: 0; z-index: 9999;
+        background: #1473e6; color: #fff; font: 600 12px/1 system-ui, sans-serif;
+        padding: 6px 12px; border-bottom-left-radius: 8px; letter-spacing: .02em;
+      }
+    </style>
+    <!-- Demo bootstrap: installs the in-memory DA, then loads the real app. -->
+    <script src="boot.js" type="module"></script>
+  </head>
+  <body>
+    <div class="mrd-demo-ribbon" title="No DA session — in-memory demo data, illustrative translations">DEMO</div>
+  </body>
+</html>

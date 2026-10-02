@@ -2775,6 +2775,19 @@ customElements.define('meridian-app', MeridianApp);
   // standalone it never resolves, so race it with a timeout.
   document.body.append(cmp);
 
+  // DEMO: the standalone GitHub Pages prototype pre-installs an in-memory DA
+  // (via setDaFetch) and a fake context before this module loads, so skip the
+  // DA_SDK handshake and boot straight into the seeded project. No-op in prod.
+  const demo = typeof window !== 'undefined' ? window.__MERIDIAN_DEMO__ : null;
+  if (demo && demo.context) {
+    cmp.context = demo.context;
+    cmp._org = demo.context.org;
+    cmp._site = demo.context.site;
+    cmp.loadSites();
+    cmp.scan();
+    return;
+  }
+
   let sdk = null;
   try {
     sdk = await Promise.race([
