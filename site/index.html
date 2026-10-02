@@ -163,7 +163,18 @@
   .q-list .q { background: var(--msurface); border: 1px solid var(--mline); border-radius: var(--radius-s); padding: 15px 18px 15px 54px; position: relative; font-size: 15px; }
   .q-list .q::before { counter-increment: q; content: "Q" counter(q); position: absolute; left: 16px; top: 15px; font-size: 12px; font-weight: 700; color: var(--maccent); background: var(--msoft); padding: 2px 7px; border-radius: 999px; }
 
-  footer { padding: 36px 24px 60px; max-width: 1000px; margin: 0 auto; color: var(--mmuted); font-size: 13px; }
+  footer { padding: 36px 24px 76px; max-width: 1000px; margin: 0 auto; color: var(--mmuted); font-size: 13px; }
+
+  .mrd-demo-nav {
+    position: fixed; left: 50%; bottom: 14px; transform: translateX(-50%); z-index: 50;
+    display: flex; align-items: center; gap: 2px;
+    background: var(--msurface); border: 1px solid var(--mline); border-radius: 999px;
+    padding: 5px 8px; box-shadow: 0 2px 12px rgb(0 0 0 / 14%); font-size: 12.5px; font-weight: 700;
+  }
+  .mrd-demo-nav .tag { background: var(--maccent); color: #fff; border-radius: 999px; padding: 3px 9px; letter-spacing: .04em; }
+  .mrd-demo-nav a { color: var(--mmuted); text-decoration: none; padding: 3px 11px; border-radius: 999px; white-space: nowrap; }
+  .mrd-demo-nav a:hover { background: var(--spectrum-gray-200); color: var(--mtext); }
+  .mrd-demo-nav .cur { color: var(--maccent); padding: 3px 11px; white-space: nowrap; }
 </style>
 </head>
 <body class="spectrum spectrum--light spectrum--medium">
@@ -616,6 +627,13 @@
   Meridian · DA-native localization prototype · AEM XSC · built for internal UX + engineering review.
   The prototype uses seeded sample data and illustrative translations.
 </footer>
+
+<div class="mrd-demo-nav">
+  <span class="tag">DEMO</span>
+  <span class="cur">Overview</span>
+  <a href="tools/apps/meridian/demo/">App prototype</a>
+  <a href="tools/plugins/meridian/demo/">In-editor panel</a>
+</div>
 
 <script>
   (function () {
