@@ -61,6 +61,16 @@
         .ew-body { flex-direction: column; }
         .ew-panel { width: auto; max-width: none; border-left: 0; border-top: 1px solid #e1e1e1; }
       }
+      .mrd-demo-nav {
+        position: fixed; left: 50%; bottom: 14px; transform: translateX(-50%); z-index: 9999;
+        display: flex; align-items: center; gap: 2px;
+        background: #fff; border: 1px solid #e1e1e1; border-radius: 999px;
+        padding: 5px 8px; box-shadow: 0 2px 12px rgb(0 0 0 / 14%); font-size: 12.5px; font-weight: 600;
+      }
+      .mrd-demo-nav .tag { background: #2680eb; color: #fff; border-radius: 999px; padding: 3px 9px; letter-spacing: .04em; }
+      .mrd-demo-nav a { color: #4b4b4b; text-decoration: none; padding: 3px 11px; border-radius: 999px; white-space: nowrap; }
+      .mrd-demo-nav a:hover { background: #f0f0f0; color: #222; }
+      .mrd-demo-nav .cur { color: #2680eb; padding: 3px 11px; white-space: nowrap; }
     </style>
     <script src="boot.js" type="module"></script>
   </head>
@@ -88,6 +98,12 @@
         <div class="ew-panel-head"><span class="dot"></span> Meridian</div>
         <div id="mrd-panel-slot"></div>
       </aside>
+    </div>
+    <div class="mrd-demo-nav">
+      <span class="tag">DEMO</span>
+      <a href="../../../../">Overview</a>
+      <a href="../../../apps/meridian/demo/">App prototype</a>
+      <span class="cur">In-editor panel</span>
     </div>
   </body>
 </html>

@@ -31,16 +31,27 @@
     <style>
       html { display: flex; } html, body { min-height: 100%; min-width: 100%; }
       body { display: block; background-color: white; }
-      .mrd-demo-ribbon {
-        position: fixed; top: 0; right: 0; z-index: 9999;
-        background: #1473e6; color: #fff; font: 600 12px/1 system-ui, sans-serif;
-        padding: 6px 12px; border-bottom-left-radius: 8px; letter-spacing: .02em;
+      .mrd-demo-nav {
+        position: fixed; left: 50%; bottom: 14px; transform: translateX(-50%); z-index: 9999;
+        display: flex; align-items: center; gap: 2px;
+        background: #fff; border: 1px solid #e1e1e1; border-radius: 999px;
+        padding: 5px 8px; box-shadow: 0 2px 12px rgb(0 0 0 / 14%);
+        font: 600 12.5px/1 "Adobe Clean", "Source Sans 3", system-ui, sans-serif;
       }
+      .mrd-demo-nav .tag { background: #2680eb; color: #fff; border-radius: 999px; padding: 3px 9px; letter-spacing: .04em; }
+      .mrd-demo-nav a { color: #4b4b4b; text-decoration: none; padding: 3px 11px; border-radius: 999px; white-space: nowrap; }
+      .mrd-demo-nav a:hover { background: #f0f0f0; color: #222; }
+      .mrd-demo-nav .cur { color: #2680eb; padding: 3px 11px; white-space: nowrap; }
     </style>
     <!-- Demo bootstrap: installs the in-memory DA, then loads the real app. -->
     <script src="boot.js" type="module"></script>
   </head>
   <body>
-    <div class="mrd-demo-ribbon" title="No DA session — in-memory demo data, illustrative translations">DEMO</div>
+    <div class="mrd-demo-nav">
+      <span class="tag">DEMO</span>
+      <a href="../../../../">Overview</a>
+      <span class="cur">App prototype</span>
+      <a href="../../../plugins/meridian/demo/">In-editor panel</a>
+    </div>
   </body>
 </html>
