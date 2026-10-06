@@ -2263,6 +2263,11 @@ class MeridianApp extends LitElement {
     else if (r.kind === 'live') badge = 'live — published';
     else if (r.kind === 'localize') badge = `localized · language ${pct}% · market ${r.heldDone}/${r.heldTotal}${mem}`;
     const previewing = this._previewOpen.has(locale);
+    // Label the source pane by the page's ACTUAL language, not a hardcoded
+    // "English": a page picked from under a locale folder (e.g. pt/...) is that
+    // locale's page, so the compare is source-locale vs target-locale.
+    const srcSeg = (this._pageRef || '').split('/')[0];
+    const srcLocale = (this._catalog?.all || []).includes(srcSeg) ? srcSeg : this._sourceLocale;
     return html`
       <div class="mrd-market">
         <div class="mrd-market-head">
@@ -2296,8 +2301,8 @@ class MeridianApp extends LitElement {
         ${previewing ? html`
           <div class="mrd-preview">
             <div class="mrd-preview-pane">
-              <div class="mrd-preview-label">Source (English)</div>
-              <iframe class="mrd-preview-frame" title="Source page ${locale}"
+              <div class="mrd-preview-label">Source (${srcLocale})</div>
+              <iframe class="mrd-preview-frame" title="Source page (${srcLocale})"
                 src=${r.sourceUrl} loading="lazy"
                 sandbox="allow-scripts allow-same-origin" referrerpolicy="no-referrer"></iframe>
             </div>
