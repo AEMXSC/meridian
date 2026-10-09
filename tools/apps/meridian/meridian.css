@@ -430,6 +430,26 @@ nx-tabs {
   margin: var(--mrd-space-200) 0 var(--mrd-space-100);
 }
 
+/* Row overflow menu items (slotted into the shared nx-popover) stack as a menu. */
+.mrd-row-more-menu .mrd-page-link,
+.mrd-row-more-menu .mrd-page-link-btn {
+  display: block;
+  width: 100%;
+  text-align: left;
+  padding: 6px 10px;
+  border-radius: var(--mrd-radius-control);
+  white-space: nowrap;
+}
+
+.mrd-row-more-menu .mrd-page-link:hover,
+.mrd-row-more-menu .mrd-page-link-btn:hover {
+  background: var(--mrd-surface-sunken);
+}
+
+.mrd-row-more {
+  --sl-btn-pad: 4px;
+}
+
 /* ---- Taste-queue actions -------------------------------------------- */
 .mrd-queue-actions {
   margin-left: auto;

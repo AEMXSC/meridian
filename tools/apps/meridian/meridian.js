@@ -35,6 +35,7 @@ import { daFetch } from '../msm/core/fetch.js';
 import 'https://da.live/nx/public/sl/components.js';
 import './shared/tabs/tabs.js';
 import './shared/card/card.js';
+import './shared/popover/popover.js';
 
 const NX = 'https://da.live/nx';
 const SEVERITY_RANK = { critical: 0, warning: 1, info: 2 };
@@ -179,6 +180,7 @@ class MeridianApp extends LitElement {
     _pageExpanded: { state: true },
     _previewOpen: { state: true },
     _compareSource: { state: true },
+    _rowMenu: { state: true },
     _pageRisk: { state: true },
     _toast: { state: true },
     _matrix: { state: true },
@@ -2277,6 +2279,25 @@ class MeridianApp extends LitElement {
     }
   }
 
+  // Row overflow menu (shared nx-popover): secondary actions (copy link, edit in
+  // EW) kept out of the row until asked for; primary actions stay inline.
+  async openRowMenu(e, r) {
+    this._rowMenu = r;
+    const anchor = e.currentTarget;
+    await this.updateComplete;
+    this.shadowRoot.querySelector('.mrd-row-more-menu')?.show({ anchor, placement: 'below-end' });
+  }
+
+  renderRowMenu(r) {
+    const close = () => this.shadowRoot.querySelector('.mrd-row-more-menu')?.close();
+    return html`
+      <button class="mrd-page-link-btn" @click=${() => { this.copyLink(r.liveUrl); close(); }}>
+        <span aria-hidden="true">⧉</span> Copy link</button>
+      ${r.path ? html`
+        <a class="mrd-page-link" href=${this.daEditUrl(r.path)} target="_blank" rel="noopener"
+          @click=${close}>Edit in EW ↗</a>` : nothing}`;
+  }
+
   renderPageResult(locale, r) {
     if (!r.ok) {
       return html`
@@ -2311,11 +2332,6 @@ class MeridianApp extends LitElement {
           </button>
           <span class="mrd-market-actions">
             <a class="mrd-page-link" href=${r.liveUrl} target="_blank" rel="noopener">View live page ↗</a>
-            <button class="mrd-page-link-btn" ?disabled=${this._pageBusy}
-              @click=${() => this.copyLink(r.liveUrl)}><span aria-hidden="true">⧉</span> Copy link</button>
-            ${r.path ? html`
-              <a class="mrd-page-link" href=${this.daEditUrl(r.path)}
-                target="_blank" rel="noopener">Edit in EW ↗</a>` : nothing}
             ${r.mode === 'sandbox' && r.ref && !r.promoted ? html`
               <sl-button ?disabled=${this._pageBusy}
                 title="Publish this reviewed page to the live /${locale}/ URL"
@@ -2324,6 +2340,8 @@ class MeridianApp extends LitElement {
                 @click=${() => this.requestPromotion(locale, r.ref, r.slug)}>${r.requested ? 'Approval requested ✓' : 'Request approval'}</sl-button>
             ` : nothing}
             ${r.promoted ? html`<span class="mrd-kind mrd-positive">promoted → live</span>` : nothing}
+            <sl-button class="mrd-row-more" title="More actions" ?disabled=${this._pageBusy}
+              @click=${(e) => this.openRowMenu(e, r)}>⋯</sl-button>
           </span>
         </div>
         ${r.kind === 'translate' && r.review?.length ? html`
@@ -2494,6 +2512,9 @@ class MeridianApp extends LitElement {
     const draftsElsewhere = this._localizeDrafts.size && this._localizeRef
       && this._localizeRef !== this._pageRef;
     return html`
+      <nx-popover class="mrd-row-more-menu" @close=${() => { this._rowMenu = null; }}>
+        ${this._rowMenu ? this.renderRowMenu(this._rowMenu) : nothing}
+      </nx-popover>
       <div class="mrd-workbench">
         <aside class="mrd-rail" aria-label="Page and market controls">
           ${this._publishMode === 'locale-root' ? html`
