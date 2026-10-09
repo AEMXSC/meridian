@@ -423,41 +423,11 @@
 .mrd-actual { background: var(--mrd-critical-tint); }
 
 /* ---- Tabs ------------------------------------------------------------ */
-.mrd-tabs {
-  display: flex;
-  gap: 4px;
+/* Tab bar is the shared nx-tabs component (ported from ew-extensions); it owns
+   its own styling, so we only place it. */
+nx-tabs {
+  display: block;
   margin: var(--mrd-space-200) 0 var(--mrd-space-100);
-  border-bottom: 1px solid var(--mrd-border);
-}
-
-.mrd-tab {
-  background: none;
-  border: none;
-  border-bottom: 2px solid transparent;
-  padding: 10px 16px;
-  font: inherit;
-  color: var(--mrd-text-muted);
-  cursor: pointer;
-  border-radius: var(--mrd-radius-control) var(--mrd-radius-control) 0 0;
-}
-
-.mrd-tab:hover { background: var(--mrd-surface-sunken); }
-
-.mrd-tab.active {
-  color: var(--mrd-text);
-  font-weight: 700;
-  border-bottom-color: var(--mrd-accent);
-}
-
-.mrd-badge {
-  display: inline-block;
-  min-width: 18px;
-  padding: 0 6px;
-  border-radius: var(--mrd-radius-pill);
-  background: var(--mrd-warning);
-  color: #fff;
-  font-size: 12px;
-  text-align: center;
 }
 
 /* ---- Taste-queue actions -------------------------------------------- */

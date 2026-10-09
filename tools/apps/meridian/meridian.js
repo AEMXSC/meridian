@@ -33,6 +33,7 @@ import { createTmTranslator, record as tmRecord, lookup as tmLookup } from './co
 import { icon } from '../msm/core/icons.js';
 import { daFetch } from '../msm/core/fetch.js';
 import 'https://da.live/nx/public/sl/components.js';
+import './shared/tabs/tabs.js';
 
 const NX = 'https://da.live/nx';
 const SEVERITY_RANK = { critical: 0, warning: 1, info: 2 };
@@ -965,23 +966,12 @@ class MeridianApp extends LitElement {
           @click=${this.handleSubmit}>Scan</sl-button>
       </div>
       ${this._state === 'ready' ? html`
-        <div class="mrd-tabs" role="tablist">
-          <button role="tab" aria-selected=${this._tab === 'overview'}
-            class="mrd-tab ${this._tab === 'overview' ? 'active' : ''}"
-            @click=${() => { this._tab = 'overview'; }}>Dashboard</button>
-          <button role="tab" aria-selected=${this._tab === 'pages'}
-            class="mrd-tab ${this._tab === 'pages' ? 'active' : ''}"
-            @click=${() => { this._tab = 'pages'; }}>Pages</button>
-          <button role="tab" aria-selected=${this._tab === 'exposure'}
-            class="mrd-tab ${this._tab === 'exposure' ? 'active' : ''}"
-            @click=${() => { this._tab = 'exposure'; }}>Issues</button>
-          <button role="tab" aria-selected=${this._tab === 'taste'}
-            class="mrd-tab ${this._tab === 'taste' ? 'active' : ''}"
-            @click=${() => this.openApprovals()}>Approvals${(this._queue.length + (this._promotions?.length || 0)) ? html` <span class="mrd-badge">${this._queue.length + (this._promotions?.length || 0)}</span>` : nothing}</button>
-          <button role="tab" aria-selected=${this._tab === 'adapt'}
-            class="mrd-tab ${this._tab === 'adapt' ? 'active' : ''}"
-            @click=${() => { this._tab = 'adapt'; }}>Market rules</button>
-        </div>
+        <nx-tabs .items=${this.tabItems()} .active=${this._tab}
+          @tab-change=${(e) => {
+    const { id } = e.detail;
+    if (id === 'taste') this.openApprovals();
+    else this._tab = id;
+  }}></nx-tabs>
         ${TAB_HELP[this._tab] ? html`<div class="mrd-tab-help">${TAB_HELP[this._tab]}</div>` : nothing}` : nothing}
       ${this._error ? html`<div class="nx-alert warning">${this._error}</div>` : nothing}
     `;
@@ -1511,6 +1501,23 @@ class MeridianApp extends LitElement {
     if (sel === '__base__') return { loc: this._sourceLocale, url: this.pageEdgeUrl(tail) };
     const site = this.siteForLocale(sel);
     return { loc: sel, url: `https://main--${site}--${this._org}.aem.live/${sel}/${tail}` };
+  }
+
+  // Tab model for the shared nx-tabs component (ported from ew-extensions). The
+  // Approvals count badge is inline-styled so it keeps the Spectrum blue inside
+  // the component's shadow root (meridian.css classes don't cross that boundary).
+  tabItems() {
+    const pending = this._queue.length + (this._promotions?.length || 0);
+    const approvals = pending
+      ? html`Approvals <span style="margin-left:5px;background:var(--s2-blue-900,#2680eb);color:#fff;border-radius:999px;padding:0 7px;font-size:11px;line-height:1.6;">${pending}</span>`
+      : 'Approvals';
+    return [
+      { id: 'overview', label: 'Dashboard' },
+      { id: 'pages', label: 'Pages' },
+      { id: 'exposure', label: 'Issues' },
+      { id: 'taste', label: approvals },
+      { id: 'adapt', label: 'Market rules' },
+    ];
   }
 
   // Transient success confirmation (auto-dismisses). Actions otherwise complete
