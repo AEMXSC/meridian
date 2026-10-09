@@ -28,6 +28,7 @@ import runWithConcurrency from './core/concurrency.js';
 import { LAYER_PRECEDENCE } from './core/schemas.js';
 import { createTranslator } from './core/translate.js';
 import { humanizeSlug, chooseSlug } from './core/slug.js';
+import { splitLocalePrefix } from './core/locale-config.js';
 import { localizePage, applyLocalization, hasPendingOverrides } from './core/localize-page.js';
 import { createTmTranslator, record as tmRecord, lookup as tmLookup } from './core/tm.js';
 import { icon } from '../msm/core/icons.js';
@@ -1474,15 +1475,27 @@ class MeridianApp extends LitElement {
     return `https://main--${this._site}--${this._org}.aem.live/${clean}`;
   }
 
-  // The canonical tail of the picked ref: strip a leading locale folder
-  // ("pt/international-banking" -> "international-banking") so the same page can
-  // be addressed in a different source locale.
+  // Split a page ref into an optional leading locale folder and the canonical
+  // tail ("pt/international-banking" -> { locale: 'pt', tail: 'international-banking' }).
+  // The locale set is the site's translate config when it declares markets;
+  // with no config (sites that haven't declared any — translate-v2.json empty)
+  // we fall back to the EDS /{locale}/ folder convention so the source/localized
+  // panes still resolve and label correctly instead of treating a localized page
+  // as the English source.
+  splitRefLocale(ref) {
+    return splitLocalePrefix(ref, this._catalog?.all || []);
+  }
+
+  // The locale of the currently picked page: its leading locale folder, or the
+  // site's source locale for an unprefixed (source-language) page. Shared by the
+  // compare-source default and the "This page" dropdown label so they can't drift.
+  pickedLocale() {
+    return this.splitRefLocale(this._pageRef).locale || this._sourceLocale;
+  }
+
+  // The canonical tail of the picked ref (locale folder stripped).
   localeTail(ref) {
-    const segs = (ref || '').split('/');
-    if (segs.length > 1 && (this._catalog?.all || []).includes(segs[0])) {
-      return segs.slice(1).join('/');
-    }
-    return ref;
+    return this.splitRefLocale(ref).tail;
   }
 
   // The left ("source") compare pane. By default it's the page you picked; you
@@ -1490,12 +1503,10 @@ class MeridianApp extends LitElement {
   // or any other market's version of the same page. Returns { loc, url }.
   compareSource() {
     const sel = this._compareSource;
+    const { tail } = this.splitRefLocale(this._pageRef);
     if (!sel) {
-      const seg = (this._pageRef || '').split('/')[0];
-      const loc = (this._catalog?.all || []).includes(seg) ? seg : this._sourceLocale;
-      return { loc, url: this.pageEdgeUrl(this._pageRef) };
+      return { loc: this.pickedLocale(), url: this.pageEdgeUrl(this._pageRef) };
     }
-    const tail = this.localeTail(this._pageRef);
     if (sel === '__base__') return { loc: this._sourceLocale, url: this.pageEdgeUrl(tail) };
     const site = this.siteForLocale(sel);
     return { loc: sel, url: `https://main--${site}--${this._org}.aem.live/${sel}/${tail}` };
@@ -2319,8 +2330,7 @@ class MeridianApp extends LitElement {
     // The source pane is the picked page by default, but can compare against the
     // base language or any market's version of the same page (see compareSource).
     const cs = this.compareSource();
-    const pickedSeg = (this._pageRef || '').split('/')[0];
-    const pickedLoc = (this._catalog?.all || []).includes(pickedSeg) ? pickedSeg : this._sourceLocale;
+    const pickedLoc = this.pickedLocale();
     const cmpMarkets = this._catalog?.all || [];
     return html`
       <div class="mrd-market">

@@ -124,3 +124,41 @@ export function parseLocaleConfig(doc) {
     languages, groups, all, siteByCode,
   };
 }
+
+// The EDS localization convention: a localized page lives under a /{locale}/
+// folder whose token is a 2-letter language, optionally with a 2–4 char region
+// ("pt", "es-mx", "zh-hans"). Used only as a fallback when the site declares no
+// markets (empty catalog), so a localized page isn't mistaken for the source.
+const LOCALE_SEGMENT = /^[a-z]{2}(-[a-z]{2,4})?$/i;
+
+/**
+ * Split a page ref into an optional leading locale folder and the canonical tail.
+ * "pt/international-banking" -> { locale: 'pt', tail: 'international-banking' }.
+ *
+ * Detection prefers the authoritative list: when `knownLocales` is non-empty, a
+ * head segment is a locale IFF it's in that list. A PARTIAL catalog therefore
+ * gets NO convention fallback — an undeclared `pt/` under a site that declares
+ * only `es`/`fr` is intentionally treated as a source path, since a declared-
+ * market site is assumed to list all its markets (avoids false positives there).
+ *
+ * Only when the list is EMPTY (a site that declares no markets at all — e.g. no
+ * /.da/translate-v2.json) do we fall back to the EDS /{locale}/ folder shape.
+ * That fallback is a heuristic: it will also match a 2-letter top-level English
+ * section (`eu/pricing` -> locale `eu`). Accepted limitation — an empty-catalog
+ * site gives us no authoritative signal to distinguish the two, and the earlier
+ * behavior (mislabeling every localized page as the source) was strictly worse.
+ *
+ * Single-segment refs never carry a locale.
+ * @param {string} ref - the page ref (no leading slash)
+ * @param {string[]} [knownLocales] - authoritative locale tokens, when available
+ * @returns {{locale: string|null, tail: string}}
+ */
+export function splitLocalePrefix(ref, knownLocales = []) {
+  const segs = String(ref ?? '').split('/');
+  if (segs.length < 2) return { locale: null, tail: ref ?? '' };
+  const [head, ...rest] = segs;
+  const isLocale = knownLocales.length
+    ? knownLocales.includes(head)
+    : LOCALE_SEGMENT.test(head);
+  return isLocale ? { locale: head, tail: rest.join('/') } : { locale: null, tail: ref };
+}

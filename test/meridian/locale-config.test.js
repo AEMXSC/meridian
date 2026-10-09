@@ -16,7 +16,7 @@
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { localeCode, parseLocaleConfig } from '../../tools/apps/meridian/core/locale-config.js';
+import { localeCode, parseLocaleConfig, splitLocalePrefix } from '../../tools/apps/meridian/core/locale-config.js';
 
 test('localeCode turns a DA location path into a safe Meridian locale token', () => {
   assert.equal(localeCode('/de'), 'de');
@@ -33,6 +33,46 @@ test('parseLocaleConfig on an absent or empty doc yields an empty catalog', () =
   };
   assert.deepEqual(parseLocaleConfig(null), empty);
   assert.deepEqual(parseLocaleConfig({ ':type': 'multi-sheet', ':names': [] }), empty);
+});
+
+test('splitLocalePrefix strips a leading locale folder using the known-locale list', () => {
+  const known = ['es', 'fr', 'de', 'pt'];
+  assert.deepEqual(splitLocalePrefix('pt/international-banking', known), { locale: 'pt', tail: 'international-banking' });
+  assert.deepEqual(splitLocalePrefix('es/personal-banking/checking', known), { locale: 'es', tail: 'personal-banking/checking' });
+});
+
+test('splitLocalePrefix leaves a source (unprefixed) ref untouched', () => {
+  const known = ['es', 'fr', 'pt'];
+  // Single segment never carries a locale.
+  assert.deepEqual(splitLocalePrefix('international-banking', known), { locale: null, tail: 'international-banking' });
+  // A multi-segment source path whose head is not a known/shaped locale.
+  assert.deepEqual(splitLocalePrefix('personal-banking/checking', known), { locale: null, tail: 'personal-banking/checking' });
+});
+
+test('splitLocalePrefix falls back to the EDS locale-folder shape when no markets are declared', () => {
+  // Regression: the live site had an empty translate-v2.json, so the catalog was
+  // empty and a /pt/ page was mislabeled as the English source. With no known
+  // locales, a convention-shaped head segment is still recognized.
+  assert.deepEqual(splitLocalePrefix('pt/international-banking', []), { locale: 'pt', tail: 'international-banking' });
+  assert.deepEqual(splitLocalePrefix('es-mx/mortgages', []), { locale: 'es-mx', tail: 'mortgages' });
+  // But a real English page section ("personal-banking") is not a locale shape.
+  assert.deepEqual(splitLocalePrefix('personal-banking/checking', []), { locale: null, tail: 'personal-banking/checking' });
+});
+
+test('splitLocalePrefix: empty-catalog fallback is a heuristic (accepted limitation)', () => {
+  // Documented trade-off: with no declared markets, a 2-letter top-level English
+  // section is indistinguishable from a locale folder, so it's treated as one.
+  // Acceptable because an empty-catalog site gives no authoritative signal, and
+  // the prior behavior (every localized page mislabeled as source) was worse.
+  assert.deepEqual(splitLocalePrefix('eu/pricing', []), { locale: 'eu', tail: 'pricing' });
+  // A PARTIAL catalog gets NO fallback: an undeclared locale stays a source path,
+  // so declared-market sites don't suffer false positives.
+  assert.deepEqual(splitLocalePrefix('pt/international-banking', ['es', 'fr']), { locale: null, tail: 'pt/international-banking' });
+});
+
+test('splitLocalePrefix handles empty and nullish refs', () => {
+  assert.deepEqual(splitLocalePrefix('', []), { locale: null, tail: '' });
+  assert.deepEqual(splitLocalePrefix(null, []), { locale: null, tail: '' });
 });
 
 const DOC = {
