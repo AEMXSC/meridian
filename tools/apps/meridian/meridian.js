@@ -34,6 +34,7 @@ import { icon } from '../msm/core/icons.js';
 import { daFetch } from '../msm/core/fetch.js';
 import 'https://da.live/nx/public/sl/components.js';
 import './shared/tabs/tabs.js';
+import './shared/card/card.js';
 
 const NX = 'https://da.live/nx';
 const SEVERITY_RANK = { critical: 0, warning: 1, info: 2 };
@@ -1062,18 +1063,16 @@ class MeridianApp extends LitElement {
     const blocked = item.gate === 'blocked';
     const rejecting = this._rejectingKey === key;
     return html`
-      <div class="mrd-market">
-        <div class="mrd-market-head">
-          <span class="mrd-kind mrd-${blocked ? 'critical' : 'warning'}">${item.gate}</span>
-          <span class="mrd-locale">${item.locale}</span>
-          <span class="mrd-detail">${item.reason}</span>
-          <span class="mrd-queue-actions">
+      <div class="mrd-queue-card">
+        <nx-card heading=${item.locale} subheading=${item.reason}>
+          <span class="mrd-kind mrd-${blocked ? 'critical' : 'warning'}" style="align-self:flex-start">${item.gate}</span>
+          <span slot="actions">
             <sl-button ?disabled=${busy || blocked}
               title=${blocked ? 'Compliance absent — cannot publish' : 'Publish to /live'}
               @click=${() => this.approve(item)}>Approve</sl-button>
             <sl-button class="negative outline" ?disabled=${busy} @click=${() => this.startReject(item)}>Reject</sl-button>
           </span>
-        </div>
+        </nx-card>
         ${rejecting ? html`
           <div class="mrd-reject-form">
             <sl-input class="mrd-reject-input" ?disabled=${busy}
@@ -1087,21 +1086,18 @@ class MeridianApp extends LitElement {
   renderPromotionItem(item) {
     const key = `promo:${item.locale}:${item.ref}`;
     const busy = this._queueBusy.has(key);
+    const sub = `${item.ref}${item.requestedBy ? ` · requested by ${item.requestedBy}` : ''}`;
     return html`
-      <div class="mrd-market">
-        <div class="mrd-market-head">
-          <span class="mrd-kind mrd-warning">promote → live</span>
-          <span class="mrd-locale">${item.locale}</span>
-          <span class="mrd-detail">${item.ref}${item.requestedBy ? ` · requested by ${item.requestedBy}` : ''}</span>
-          <span class="mrd-queue-actions">
-            <sl-button ?disabled=${busy}
-              title="Promote the reviewed sandbox page to /${item.locale}/${item.ref}"
-              @click=${() => this.approvePromotion(item)}>Approve &amp; promote</sl-button>
-            <sl-button class="negative outline" ?disabled=${busy}
-              @click=${() => this.rejectPromotion(item)}>Reject</sl-button>
-          </span>
-        </div>
-      </div>`;
+      <nx-card heading=${item.locale} subheading=${sub}>
+        <span class="mrd-kind mrd-warning" style="align-self:flex-start">promote → live</span>
+        <span slot="actions">
+          <sl-button ?disabled=${busy}
+            title="Promote the reviewed sandbox page to /${item.locale}/${item.ref}"
+            @click=${() => this.approvePromotion(item)}>Approve &amp; promote</sl-button>
+          <sl-button class="negative outline" ?disabled=${busy}
+            @click=${() => this.rejectPromotion(item)}>Reject</sl-button>
+        </span>
+      </nx-card>`;
   }
 
   renderTaste() {
