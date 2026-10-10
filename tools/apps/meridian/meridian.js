@@ -277,9 +277,21 @@ class MeridianApp extends LitElement {
     this._localizeOrg = '';
     this._localizeSite = '';
     // Deep-link / editor context wins; otherwise fall back to the most recent
-    // org/site so a returning author lands where they left off.
-    this._org = this._org || (this._recent[0]?.org ?? '');
-    this._site = this._site || (this._recent[0]?.site ?? '');
+    // org/site so a returning author lands where they left off. Fall back as a
+    // PAIR, org-aware: never borrow a recent site for a different org — opening
+    // with ?org=aemshowcase (no site) must not inherit a recent citizens site
+    // and form the unscannable aemshowcase/citizens pair. If the org is known
+    // but has no recent site, leave the site empty so the picker lists the org's
+    // real sites for the author to choose.
+    if (!this._site) {
+      const match = this._org
+        ? this._recent.find((r) => r.org === this._org)
+        : this._recent[0];
+      if (match) {
+        this._org = this._org || match.org;
+        this._site = match.site;
+      }
+    }
     // Scan is triggered by init() once the DA session is (or isn't) available —
     // not here — so the toolbar always renders even without a DA context.
     // Escape closes the editor overlay (WAI-ARIA dialog behaviour).
@@ -317,6 +329,10 @@ class MeridianApp extends LitElement {
   }
 
   async loadSites() {
+    // Drop the previous org's sites immediately so the picker never offers a
+    // stale cross-org site during the async fetch (recent-for-this-org entries
+    // in siteSuggestions still show right away).
+    this._sites = [];
     this._sites = await listSites(this._org);
   }
 
@@ -328,7 +344,16 @@ class MeridianApp extends LitElement {
   }
 
   async onOrgChange(e) {
-    this._org = e.target.value.trim();
+    const org = e.target.value.trim();
+    // Only reset the site on an actual org change (re-submitting the same org is
+    // a retry — fall through to reload its site list). The selected site belonged
+    // to the previous org; carry it over only if this org has used it before (a
+    // valid pair), otherwise clear it so the picker makes the author choose one of
+    // the new org's real sites — never leave a cross-org pair staged for Scan.
+    if (org !== this._org) {
+      this._org = org;
+      this._site = this._recent.find((r) => r.org === org)?.site ?? '';
+    }
     await this.loadSites();
   }
 
@@ -2879,7 +2904,13 @@ customElements.define('meridian-app', MeridianApp);
   if (sdk && sdk.context) {
     cmp.context = sdk.context;
     cmp._org = cmp._org || sdk.context.org || '';
-    cmp._site = cmp._site || sdk.context.site || sdk.context.repo || '';
+    // Only inherit the context's site when it belongs to the resolved org — a
+    // deep link (?org=…) can scope to a different org than the DA page the tool
+    // was opened from, and pairing that org with this org's site/repo would form
+    // an unscannable cross-org pair (e.g. aemshowcase/citizens).
+    if (!cmp._site && (!cmp._org || cmp._org === sdk.context.org)) {
+      cmp._site = sdk.context.site || sdk.context.repo || '';
+    }
     // Load the current org's site list so the picker offers every site.
     if (cmp._org) cmp.loadSites();
     if (cmp._org && cmp._site) cmp.scan();
