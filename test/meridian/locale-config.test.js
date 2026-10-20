@@ -16,7 +16,9 @@
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { localeCode, parseLocaleConfig, splitLocalePrefix } from '../../tools/apps/meridian/core/locale-config.js';
+import {
+  localeCode, parseLocaleConfig, splitLocalePrefix, buildLocaleConfigDoc,
+} from '../../tools/apps/meridian/core/locale-config.js';
 
 test('localeCode turns a DA location path into a safe Meridian locale token', () => {
   assert.equal(localeCode('/de'), 'de');
@@ -167,4 +169,144 @@ test('parseLocaleConfig captures per-market target sites (DA `site` column)', ()
   assert.equal(siteByCode['de-ca'], 'citizens-ca', 'group site overrides + strips leading slash');
   assert.equal(siteByCode['fr-ca'], 'citizens-ca');
   assert.equal('fr' in siteByCode, false, 'base-site locales are absent from the map');
+});
+
+test('buildLocaleConfigDoc stands up a catalog from a blank site and round-trips through parseLocaleConfig', () => {
+  const doc = buildLocaleConfigDoc(null, [
+    { code: 'es', name: 'Spanish' },
+    { code: 'fr', name: 'French' },
+  ]);
+  assert.equal(doc[':type'], 'multi-sheet');
+  assert.deepEqual(parseLocaleConfig(doc).all, ['es', 'fr']);
+  assert.deepEqual(parseLocaleConfig(doc).languages.map((l) => l.name), ['Spanish', 'French']);
+});
+
+test('buildLocaleConfigDoc preserves the source row, region groups, sibling sheets and per-market site routing', () => {
+  const existing = {
+    ':type': 'multi-sheet',
+    ':names': ['languages', 'locales', 'other'],
+    languages: {
+      total: 3,
+      limit: 3,
+      offset: 0,
+      data: [
+        { name: 'English', location: '' },
+        { name: 'German', location: '/de', site: 'citizens-de' },
+        { name: 'Italian', location: '/it' },
+      ],
+    },
+    locales: {
+      total: 1, limit: 1, offset: 0, data: [{ name: 'Canada', location: '/ca' }],
+    },
+    other: {
+      total: 1, limit: 1, offset: 0, data: [{ k: 'v' }],
+    },
+  };
+  const next = buildLocaleConfigDoc(existing, [
+    { code: 'de', name: 'German' },
+    { code: 'es', name: 'Spanish' },
+  ]);
+  // Italian removed, Spanish added, German keeps its routing.
+  const langs = next.languages.data;
+  assert.deepEqual(langs.map((r) => r.location), ['', '/de', '/es']);
+  assert.equal(langs[1].site, 'citizens-de');
+  // Untouched sheets survive verbatim.
+  assert.deepEqual(next.locales, existing.locales);
+  assert.deepEqual(next.other, existing.other);
+  assert.deepEqual(parseLocaleConfig(next).languages.map((l) => l.code), ['de', 'es']);
+});
+
+test('buildLocaleConfigDoc renames a kept market, dedupes codes, and never mutates its input', () => {
+  const existing = {
+    ':type': 'multi-sheet',
+    ':names': ['languages'],
+    languages: {
+      total: 1, limit: 1, offset: 0, data: [{ name: 'Old', location: '/es' }],
+    },
+  };
+  const frozen = JSON.parse(JSON.stringify(existing));
+  const next = buildLocaleConfigDoc(existing, [
+    { code: 'es', name: 'Spanish' },
+    { code: 'es', name: 'Dup' },
+  ]);
+  assert.deepEqual(next.languages.data.map((r) => r.name), ['Spanish']);
+  assert.deepEqual(existing, frozen);
+});
+
+test('buildLocaleConfigDoc rejects empty or unsafe market codes before producing a doc', () => {
+  assert.throws(() => buildLocaleConfigDoc(null, [{ code: '', name: 'x' }]), /locale code/i);
+  assert.throws(() => buildLocaleConfigDoc(null, [{ code: '../x', name: 'x' }]), /locale code/i);
+  assert.throws(() => buildLocaleConfigDoc(null, [{ code: 'a/b', name: 'x' }]), /locale code/i);
+});
+
+test('buildLocaleConfigDoc leaves rows it cannot interpret untouched (no silent deletion)', () => {
+  const existing = {
+    ':type': 'multi-sheet',
+    ':names': ['languages'],
+    languages: {
+      total: 2,
+      limit: 2,
+      offset: 0,
+      data: [{ name: 'Hand note', location: '/not a locale' }, { name: 'Spanish', location: '/es' }],
+    },
+  };
+  const next = buildLocaleConfigDoc(existing, [{ code: 'fr', name: 'French' }]);
+  assert.deepEqual(next.languages.data.map((r) => r.location), ['/not a locale', '/fr']);
+});
+
+test('buildLocaleConfigDoc keeps a kept market\'s location verbatim (no nested-path rewrite)', () => {
+  const existing = {
+    ':type': 'multi-sheet',
+    ':names': ['languages'],
+    languages: {
+      total: 2,
+      limit: 2,
+      offset: 0,
+      data: [
+        { name: 'Spanish (Mexico)', location: '/es/mx' },
+        { name: 'German', location: '/de/' },
+      ],
+    },
+  };
+  const next = buildLocaleConfigDoc(existing, [
+    { code: 'es-mx', name: 'Spanish (Mexico)' },
+    { code: 'de', name: 'German' },
+    { code: 'fr', name: 'French' },
+  ]);
+  // Existing rows keep exactly what DA has; only the NEW row gets a derived location.
+  assert.deepEqual(next.languages.data.map((r) => r.location), ['/es/mx', '/de/', '/fr']);
+});
+
+test('buildLocaleConfigDoc preserves sibling sheets even when the doc lacks a :type marker', () => {
+  const existing = {
+    languages: {
+      total: 1, limit: 1, offset: 0, data: [{ name: 'Italian', location: '/it' }],
+    },
+    locales: {
+      total: 1, limit: 1, offset: 0, data: [{ name: 'Canada', location: '/ca' }],
+    },
+  };
+  const next = buildLocaleConfigDoc(existing, [{ code: 'es', name: 'Spanish' }]);
+  assert.deepEqual(next.locales, existing.locales);
+  assert.deepEqual(next.languages.data.map((r) => r.location), ['/es']);
+});
+
+test('buildLocaleConfigDoc does not invent a name for a kept row that has none', () => {
+  const existing = {
+    ':type': 'multi-sheet',
+    ':names': ['languages'],
+    languages: {
+      total: 1,
+      limit: 1,
+      offset: 0,
+      data: [{ name: '', location: '/es' }],
+    },
+  };
+  // The Setup UI shows a nameless market by its code, so the draft carries name === code.
+  const next = buildLocaleConfigDoc(existing, [
+    { code: 'es', name: 'es' },
+    { code: 'fr', name: 'fr' },
+  ]);
+  assert.deepEqual(next.languages.data[0], { name: '', location: '/es' });
+  assert.deepEqual(next.languages.data[1], { name: 'fr', location: '/fr' });
 });

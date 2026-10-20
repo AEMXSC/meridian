@@ -1338,3 +1338,111 @@ nx-tabs {
   color: var(--mrd-text);
   resize: vertical;
 }
+
+/* Setup tab: declare / edit the site's markets, source language, publishing. */
+.mrd-setup {
+  display: flex;
+  flex-direction: column;
+  gap: var(--mrd-space-200);
+  max-width: 720px;
+}
+
+.mrd-setup-section {
+  display: flex;
+  flex-direction: column;
+  gap: var(--mrd-space-100);
+  padding: var(--mrd-space-200);
+  border: 1px solid var(--mrd-border);
+  border-radius: var(--mrd-radius-card);
+  background: var(--mrd-surface);
+}
+
+.mrd-setup-section h3,
+.mrd-setup-section legend {
+  margin: 0;
+  padding: 0;
+  font-size: 15px;
+  font-weight: 700;
+}
+
+/* The Publishing group is a real <fieldset>; reset its UA box so it matches the cards. */
+fieldset.mrd-setup-section {
+  min-width: 0;
+  margin: 0;
+}
+
+.mrd-setup-section .mrd-entry-meta {
+  margin: 0;
+}
+
+/* Market chips here read "es — Spanish ×": keep the name's own casing, and flow
+   them in wrapping rows (the rail's one-per-line column is wrong for a wide form). */
+.mrd-setup .mrd-lang-chip {
+  text-transform: none;
+}
+
+.mrd-setup .mrd-lang-chips {
+  flex-direction: row;
+  flex-wrap: wrap;
+}
+
+.mrd-setup-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--mrd-space-100);
+}
+
+.mrd-setup-input {
+  font: inherit;
+  font-size: 14px;
+  padding: 6px 10px;
+  border: 1px solid var(--mrd-border);
+  border-radius: var(--mrd-radius-control);
+  background: var(--mrd-surface);
+  color: var(--mrd-text);
+}
+
+.mrd-setup-input:focus-visible {
+  outline: 2px solid var(--mrd-accent);
+  outline-offset: 1px;
+  border-color: var(--mrd-accent);
+}
+
+.mrd-setup-radio {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--mrd-space-100);
+  font-size: 14px;
+  cursor: pointer;
+}
+
+.mrd-setup-error {
+  padding: var(--mrd-space-100) var(--mrd-space-200);
+  border: 1px solid var(--mrd-critical);
+  border-radius: var(--mrd-radius-control);
+  background: var(--mrd-critical-tint);
+  color: var(--mrd-critical);
+  font-size: 14px;
+}
+
+/* A text-link styled button (the empty-markets banner's "Set up markets"). */
+.mrd-link {
+  font: inherit;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--mrd-accent);
+  text-decoration: underline;
+  cursor: pointer;
+}
+
+/* Inside the stacked setup cards, keep status chips and single-value inputs
+   content-sized instead of stretching across the card. */
+.mrd-setup-section .mrd-kind {
+  align-self: flex-start;
+}
+
+.mrd-setup-section > .mrd-setup-input {
+  max-width: 200px;
+}

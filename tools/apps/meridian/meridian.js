@@ -29,6 +29,10 @@ import { LAYER_PRECEDENCE } from './core/schemas.js';
 import { createTranslator } from './core/translate.js';
 import { humanizeSlug, chooseSlug } from './core/slug.js';
 import { splitLocalePrefix } from './core/locale-config.js';
+import {
+  addDraftMarket, removeDraftMarket, validateSetup, diffMarkets, isPartialModelConfig,
+  PUBLISH_MODES,
+} from './core/setup.js';
 import { localizePage, applyLocalization, hasPendingOverrides } from './core/localize-page.js';
 import { createTmTranslator, record as tmRecord, lookup as tmLookup } from './core/tm.js';
 import { icon } from '../msm/core/icons.js';
@@ -60,7 +64,7 @@ try {
 
 // Deep-link org/site so an author arriving from the editor plugin never
 // re-enters context (the annoyance called out in the Experience Workspace demo).
-const TABS = ['overview', 'pages', 'exposure', 'taste', 'adapt'];
+const TABS = ['overview', 'pages', 'exposure', 'taste', 'adapt', 'setup'];
 
 // Plain-language one-liners for the jargon-y queue tabs (shown under the tabs).
 const TAB_HELP = {
@@ -168,6 +172,7 @@ class MeridianApp extends LitElement {
     _translate: { state: true },
     _catalog: { state: true },
     _publishMode: { state: true },
+    _setup: { state: true },
     _edge: { state: true },
     _pageRef: { state: true },
     _pageResults: { state: true },
@@ -238,6 +243,9 @@ class MeridianApp extends LitElement {
     // Where materialized pages publish: 'sandbox' (namespaced /meridian/live) or
     // 'locale-root' (clean /{locale} URLs). Defaults from config; toggleable.
     this._publishMode = 'sandbox';
+    // Setup-tab draft (markets / source / publish mode); built on opening the tab
+    // and dropped whenever the org/site changes (see scan()).
+    this._setup = null;
     // Opt-in: translate the page name (slug) so a market publishes at a localized
     // URL (/es/financiacion), not /es/financing. Off = every URL stays the source
     // ref, so behaviour is unchanged until an author turns it on.
@@ -370,6 +378,7 @@ class MeridianApp extends LitElement {
     this._allPages = null;
     this._pageRisk = [];
     this._bulkResults = [];
+    this._setup = null;
     this._pendingPromoKeys = new Set();
     // Consume the editor-plugin deep link exactly once: capture + clear it now, so
     // a failed first scan or a later site switch can never re-apply a stale page.
@@ -436,10 +445,11 @@ class MeridianApp extends LitElement {
       if (this._canonicalId) this.loadAdaptations();
       this.loadTranslate();
       this.loadCatalog();
+      if (this._tab === 'setup') this.openSetup();
       this.loadManaged();
       if (this._policies.length) this.loadEdgeStatus();
       // Present-but-malformed config: note it, but don't block the Pages flow.
-      if (config && !valid) {
+      if (isPartialModelConfig(config)) {
         this._error = 'Note: /meridian/config.json is malformed (needs canonicalId + policies[]). Pages still works; fix it to enable exposure & adaptations.';
       }
     } catch (e) {
@@ -606,9 +616,12 @@ class MeridianApp extends LitElement {
   // app reads, so a site already configured there needs no reconfiguration.
   // Best-effort: a site with no config just falls back to folder discovery.
   async loadCatalog() {
+    const store = this.pageStore();
     try {
-      this._catalog = await this.pageStore().localeCatalog();
+      const catalog = await store.localeCatalog();
+      if (this._store === store) this._catalog = catalog;
     } catch (e) {
+      if (this._store !== store) return;
       console.error('Failed to read DA locale config', e);
       this._catalog = null;
     }
@@ -999,6 +1012,7 @@ class MeridianApp extends LitElement {
           @tab-change=${(e) => {
     const { id } = e.detail;
     if (id === 'taste') this.openApprovals();
+    else if (id === 'setup') this.showSetup();
     else this._tab = id;
   }}></nx-tabs>
         ${TAB_HELP[this._tab] ? html`<div class="mrd-tab-help">${TAB_HELP[this._tab]}</div>` : nothing}` : nothing}
@@ -1311,6 +1325,269 @@ class MeridianApp extends LitElement {
     `;
   }
 
+  // ---- Setup tab: declare / edit the site's markets ------------------------
+  // The market list the Pages picker, compare dropdown and coverage matrix read
+  // (translate-v2.json), plus the source language and publish mode (config.json).
+  // Opens pre-filled from what's saved, so the same screen creates AND edits.
+  //
+  // Every async step captures the store it started on and re-checks it after each
+  // await: a site switch builds a new store, so late work for the old site can
+  // neither repaint nor write into the new one. Writes use the CAPTURED store.
+
+  setSetup(patch) {
+    if (!this._setup) return; // site switched mid-flight: drop the late update
+    this._setup = { ...this._setup, ...patch };
+  }
+
+  // Show the Setup tab. A half-edited draft is kept when the author comes back.
+  showSetup() {
+    this._tab = 'setup';
+    if (!this._setup || this._setup.loading) this.openSetup();
+  }
+
+  async openSetup() {
+    const store = this._store;
+    this._setup = { loading: true };
+    try {
+      // A failed read (anything but "no file yet") throws — it must never become
+      // an empty draft that a Save would then write over the real market list.
+      const catalog = await store.localeCatalog();
+      if (this._store !== store) return;
+      const markets = catalog.languages.map((l) => ({ code: l.code, name: l.name || l.code }));
+      this._setup = {
+        loaded: markets.map((m) => m.code),
+        groups: catalog.groups.length,
+        markets,
+        sourceLocale: this._sourceLocale,
+        publishMode: this._publishMode,
+        custom: { code: '', name: '' },
+        error: '',
+        confirm: false,
+        busy: false,
+        ew: '',
+        ewConfirm: false,
+        ewBusy: false,
+      };
+    } catch (e) {
+      if (this._store !== store) return;
+      console.error(e);
+      this._setup = {
+        loadError: `Couldn't read this site's market list (${e.message}). Setup stays locked so it can't overwrite it.`,
+      };
+    }
+  }
+
+  addSetupMarket(code, name) {
+    const { markets, error } = addDraftMarket(this._setup.markets, code, name);
+    this.setSetup({
+      markets, error, confirm: false, ...(error ? {} : { custom: { code: '', name: '' } }),
+    });
+  }
+
+  // Step 1 of saving: validate, then show exactly what will be written.
+  requestSaveSetup() {
+    const error = validateSetup(this._setup);
+    this.setSetup({ error, confirm: !error });
+  }
+
+  // Step 2 (after the author confirms): apply the CHANGES to a fresh read of the
+  // market list, then the config, then re-apply.
+  async saveSetup() {
+    const s = this._setup;
+    const store = this._store;
+    const error = validateSetup(s);
+    if (error) {
+      this.setSetup({ error, confirm: false });
+      return;
+    }
+    this.setSetup({ busy: true, error: '' });
+    const sourceLocale = s.sourceLocale.trim();
+    const configChanged = sourceLocale !== this._sourceLocale
+      || s.publishMode !== this._publishMode;
+    let marketsSaved = false;
+    // The site changed under us: stop, but never silently — if the market list was
+    // already written, say which site it landed on.
+    const abandoned = () => {
+      if (this._store === store) return false;
+      if (marketsSaved) {
+        this.showToast(`Market list saved for ${store.org}/${store.site}${configChanged ? '; the other settings were not applied' : ''}.`);
+      }
+      return true;
+    };
+    try {
+      await store.updateMarkets({ ...diffMarkets(s.loaded, s.markets), sourceLocale });
+      marketsSaved = true;
+      if (abandoned()) return;
+      if (configChanged) {
+        await store.updateConfig({ sourceLocale, publishMode: s.publishMode });
+        if (abandoned()) return;
+        // scan() rebuilds the stores with the new source language and, since this
+        // is the Setup tab, reopens Setup from what was just saved.
+        await this.scan();
+        if (this._state === 'ready') this.showToast('Setup saved');
+      } else {
+        await this.loadCatalog();
+        if (abandoned()) return;
+        this.showToast('Setup saved');
+        await this.openSetup();
+      }
+    } catch (e) {
+      console.error(e);
+      if (this._store !== store) return;
+      const partial = marketsSaved
+        ? ' The market list was saved; source language and publishing were not.' : '';
+      this.setSetup({ busy: false, confirm: false, error: `Save failed: ${e.message}.${partial}` });
+      // The market list may have changed even though the save didn't finish.
+      this.loadCatalog();
+    }
+  }
+
+  requestEnableEw() {
+    this.setSetup({ ewConfirm: true, error: '' });
+  }
+
+  async enableEw() {
+    const store = this._store;
+    this.setSetup({ ewBusy: true, ewConfirm: false, error: '' });
+    try {
+      const ew = await store.enableExperienceWorkspace();
+      if (this._store === store) this.setSetup({ ew, ewBusy: false });
+    } catch (e) {
+      console.error(e);
+      if (this._store === store) {
+        this.setSetup({ ewBusy: false, error: `Experience Workspace: ${e.message}` });
+      }
+    }
+  }
+
+  renderSetupMarkets(s) {
+    const quick = LANG_OPTIONS.filter(([code]) => !s.markets.some((m) => m.code === code)
+      && code.toLowerCase() !== s.sourceLocale.trim().toLowerCase());
+    const addOnEnter = (e) => {
+      if (e.key !== 'Enter') return;
+      e.preventDefault();
+      this.addSetupMarket(this._setup.custom.code, this._setup.custom.name);
+    };
+    return html`
+      <section class="mrd-setup-section">
+        <h3>Target markets</h3>
+        <p class="mrd-entry-meta">The languages this site localizes into. Removing one only takes it off this list — pages already localized stay as they are.</p>
+        <div class="mrd-lang-chips">
+          ${s.markets.length ? s.markets.map((m) => html`
+            <button class="mrd-lang-chip on" title="Remove ${m.code}" aria-label="Remove ${m.name} (${m.code})"
+              @click=${() => this.setSetup({
+    markets: removeDraftMarket(this._setup.markets, m.code), confirm: false,
+  })}>
+              ${m.code} — ${m.name} ×
+            </button>`) : html`<span class="mrd-entry-meta">No markets yet — add one below.</span>`}
+        </div>
+        ${quick.length ? html`
+          <div class="mrd-lang-chips" role="group" aria-label="Quick add">
+            ${quick.map(([code, name]) => html`
+              <button class="mrd-lang-chip" @click=${() => this.addSetupMarket(code, name)}>+ ${name}</button>`)}
+          </div>` : nothing}
+        <div class="mrd-setup-row">
+          <input class="mrd-setup-input" aria-label="Locale code" placeholder="code (e.g. fr-ca)"
+            .value=${s.custom.code} @keydown=${addOnEnter}
+            @input=${(e) => this.setSetup({ custom: { ...this._setup.custom, code: e.target.value } })} />
+          <input class="mrd-setup-input" aria-label="Language name" placeholder="name (optional)"
+            .value=${s.custom.name} @keydown=${addOnEnter}
+            @input=${(e) => this.setSetup({ custom: { ...this._setup.custom, name: e.target.value } })} />
+          <sl-button class="primary outline"
+            @click=${() => this.addSetupMarket(s.custom.code, s.custom.name)}>Add market</sl-button>
+        </div>
+        ${s.groups ? html`<p class="mrd-entry-meta">${s.groups} region group(s) are managed in the DA localization app and are left untouched.</p>` : nothing}
+      </section>`;
+  }
+
+  // What Save will do, in words: the exact file(s) and the market changes.
+  renderSetupConfirm(s) {
+    const { org, site } = this._store;
+    const { add, remove } = diffMarkets(s.loaded, s.markets);
+    const cfgChanged = s.sourceLocale.trim() !== this._sourceLocale
+      || s.publishMode !== this._publishMode;
+    const wipe = s.loaded.length > 0 && !s.markets.length;
+    return html`
+      <div class="mrd-entry-meta" role="status">
+        This writes <code>/.da/translate-v2.json</code>${cfgChanged ? html` and <code>/meridian/config.json</code>` : nothing}
+        in ${org}/${site}.
+        ${add.length ? html`Adds: ${add.map((m) => m.code).join(', ')}.` : nothing}
+        ${remove.length ? html`Removes: ${remove.join(', ')}.` : nothing}
+        ${wipe ? html`<strong>This removes every market from the list.</strong>` : nothing}
+      </div>
+      <div class="mrd-setup-row">
+        <sl-button ?disabled=${s.busy} @click=${() => this.saveSetup()}>Confirm &amp; save</sl-button>
+        <sl-button class="primary outline" ?disabled=${s.busy}
+          @click=${() => this.setSetup({ confirm: false })}>Cancel</sl-button>
+      </div>`;
+  }
+
+  renderSetupEw(s) {
+    const { org, site } = this._store;
+    return html`
+      <section class="mrd-setup-section">
+        <h3>Experience Workspace</h3>
+        <p class="mrd-entry-meta">Open pages in the DA canvas editor. Adds an <code>editor.path</code> row for ${org}/${site} to the ${org} org config.</p>
+        ${s.ewConfirm ? html`
+          <div class="mrd-entry-meta" role="status">
+            This adds one row to the ${org} org config, shared by every site in the org. Its other settings are kept.
+          </div>
+          <div class="mrd-setup-row">
+            <sl-button @click=${() => this.enableEw()}>Confirm &amp; enable</sl-button>
+            <sl-button class="primary outline"
+              @click=${() => this.setSetup({ ewConfirm: false })}>Cancel</sl-button>
+          </div>` : html`
+          <sl-button class="primary outline" ?disabled=${s.ewBusy}
+            @click=${() => this.requestEnableEw()}>Enable Experience Workspace</sl-button>`}
+        ${s.ew ? html`<span class="mrd-kind mrd-positive" role="status">${s.ew === 'exists' ? 'already enabled' : 'enabled'}</span>` : nothing}
+      </section>`;
+  }
+
+  renderSetup() {
+    const s = this._setup;
+    const { org, site } = this._store;
+    if (!s || s.loading) return html`<div class="mrd-loading">Loading setup…</div>`;
+    if (s.loadError) {
+      return html`
+        <div class="mrd-setup">
+          <div class="mrd-setup-error" role="alert">${s.loadError}</div>
+          <div><sl-button class="primary outline"
+            @click=${() => this.openSetup()}>Retry</sl-button></div>
+        </div>`;
+    }
+    const modes = {
+      sandbox: ['Review first', 'Pages stage in a sandbox; you promote them to the live locale URL.'],
+      'locale-root': ['Direct publish', 'Pages go straight to real locale URLs (e.g. /fr/page), skipping the sandbox review.'],
+    };
+    return html`
+      <div class="mrd-setup">
+        <p class="mrd-adapt-intro">
+          Decide which languages ${org}/${site} localizes into. Edit this any time — it opens with what's saved.
+        </p>
+        <section class="mrd-setup-section">
+          <h3>Source language</h3>
+          <p class="mrd-entry-meta">The language of the site's own pages — never a target market.</p>
+          <input class="mrd-setup-input" aria-label="Source language code" .value=${s.sourceLocale}
+            @input=${(e) => this.setSetup({ sourceLocale: e.target.value, confirm: false })} />
+        </section>
+        ${this.renderSetupMarkets(s)}
+        <fieldset class="mrd-setup-section">
+          <legend>Publishing</legend>
+          ${PUBLISH_MODES.map((mode) => html`
+            <label class="mrd-setup-radio">
+              <input type="radio" name="mrd-publish-mode" .checked=${s.publishMode === mode}
+                @change=${() => this.setSetup({ publishMode: mode, confirm: false })} />
+              <span><strong>${modes[mode][0]}</strong> — ${modes[mode][1]}</span>
+            </label>`)}
+        </fieldset>
+        ${this.renderSetupEw(s)}
+        ${s.error ? html`<div class="mrd-setup-error" role="alert">${s.error}</div>` : nothing}
+        ${s.confirm
+    ? this.renderSetupConfirm(s)
+    : html`<sl-button ?disabled=${s.busy} @click=${() => this.requestSaveSetup()}>Save setup</sl-button>`}
+      </div>`;
+  }
+
   // Shared setup for both page actions. Returns { ref, locales, store, translate }
   // or { error }.
   pageInputs() {
@@ -1487,7 +1764,14 @@ class MeridianApp extends LitElement {
             </span>`;
   })}`;
     }
+    // No markets declared (catalog loaded but empty): keep the common-language
+    // chips so a new site is usable straight away, but say so and point at Setup.
     return html`
+      ${cat ? html`
+        <div class="mrd-entry-meta mrd-mode-note">
+          No markets are set up for this site — showing common languages.
+          <button class="mrd-link" @click=${() => this.showSetup()}>Set up markets →</button>
+        </div>` : nothing}
       <span class="mrd-lang-row">
         ${LANG_OPTIONS.filter(([code]) => notSource(code)).map(([code, name]) => this.renderChip(code, name))}
       </span>`;
@@ -1551,6 +1835,7 @@ class MeridianApp extends LitElement {
       { id: 'exposure', label: 'Issues' },
       { id: 'taste', label: approvals },
       { id: 'adapt', label: 'Market rules' },
+      { id: 'setup', label: 'Setup' },
     ];
   }
 
@@ -2854,6 +3139,7 @@ class MeridianApp extends LitElement {
     if (this._tab === 'overview') return this.renderOverview();
     if (this._tab === 'taste') return this.renderTaste();
     if (this._tab === 'adapt') return this.renderAdaptations();
+    if (this._tab === 'setup') return this.renderSetup();
     if (this._tab === 'pages') return this.renderPages();
     return this.renderExposure();
   }

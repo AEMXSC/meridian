@@ -33,7 +33,7 @@
 // captured by DA but intentionally ignored here — Meridian scopes every write
 // to the current site's /meridian tree (single-site by design).
 
-import { readSheet } from './da-config.js';
+import { readSheet, writeSheet } from './da-config.js';
 
 // A locale token Meridian can safely use as a path segment (letters, digits,
 // underscore, hyphen) — matches store.js's SAFE_SEGMENT so anything the catalog
@@ -161,4 +161,57 @@ export function splitLocalePrefix(ref, knownLocales = []) {
     ? knownLocales.includes(head)
     : LOCALE_SEGMENT.test(head);
   return isLocale ? { locale: head, tail: rest.join('/') } : { locale: null, tail: ref };
+}
+
+// writeSheet only keeps sibling sheets of a doc marked `:type: multi-sheet`, but
+// readSheet also accepts a doc that simply has named sheets. Mark such a doc so
+// its other sheets (region groups, anything a site added) aren't dropped on write.
+function asMultiSheet(doc) {
+  const plain = doc && typeof doc === 'object' && !Array.isArray(doc);
+  if (!plain || doc[':type'] === 'multi-sheet' || !Array.isArray(doc.languages?.data)) return doc;
+  return { ...doc, ':type': 'multi-sheet' };
+}
+
+/**
+ * The inverse of parseLocaleConfig for the base-language list: return a NEW
+ * translate-v2 doc whose `languages` sheet is exactly `markets` (plus the root /
+ * source row, if any), preserving every other sheet (region groups, anything a
+ * site added) and each kept market's extra columns (e.g. its `site` routing).
+ * Never mutates the input. Throws on an empty/unsafe code so a bad token can
+ * never be written as a path segment.
+ * @param {object|Array|null} existingDoc - the current translate-v2.json (or null)
+ * @param {{code: string, name?: string}[]} markets - the desired target languages
+ * @returns {object} the multi-sheet doc to write back
+ */
+export function buildLocaleConfigDoc(existingDoc, markets) {
+  const isObj = (row) => row && typeof row === 'object';
+  const existing = readSheet(existingDoc, 'languages').filter(isObj);
+  const byCode = new Map(existing.map((row) => [localeCode(row.location), row]));
+  // Rows that aren't markets we manage stay exactly as authored: the source
+  // language (empty location) and anything with a location we can't read as a
+  // safe locale token. Never delete what we don't understand in a shared config.
+  const root = existing.filter((row) => {
+    const token = localeCode(row.location);
+    return token === '' || !SAFE.test(token);
+  });
+
+  const seen = new Set();
+  const rows = [];
+  markets.forEach(({ code, name }) => {
+    const token = String(code ?? '').trim();
+    if (!token || !SAFE.test(token)) throw new Error(`Invalid locale code: "${token}"`);
+    if (seen.has(token)) return;
+    seen.add(token);
+    const kept = byCode.get(token);
+    const given = String(name ?? '').trim();
+    // A market already in the sheet keeps its row exactly as authored — notably
+    // its `location` (DA allows nested "/es/mx"; localeCode would flatten that to
+    // "es-mx"). It's renamed only for a real new name; a name equal to the code is
+    // how a nameless row is displayed, not a name to write. Only a NEW market gets
+    // a derived location.
+    rows.push(kept
+      ? { ...kept, ...(given && given !== token ? { name: given } : {}) }
+      : { name: given || token, location: `/${token}` });
+  });
+  return writeSheet(asMultiSheet(existingDoc), 'languages', [...root, ...rows]);
 }

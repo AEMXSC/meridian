@@ -33,6 +33,10 @@ function res(body, status = 200, headers = {}) {
 }
 const notFound = () => new Response(null, { status: 404 });
 
+// The org config KV (admin.da.live/config/{org}) — in memory, so the Setup tab's
+// "Enable Experience Workspace" works in the demo without touching a real org.
+let orgConfig = null;
+
 // Immediate children of a source folder, shaped like a DA /list response:
 // { name, path, ext } with the /org/site prefix the app strips off.
 function listChildren(fs, org, site, sub) {
@@ -113,6 +117,16 @@ async function mockFetch(fs, org, site, url, opts = {}) {
       if (parts[0] !== org || parts[1] !== site) return res('[]', 200);
       const sub = parts.length > 2 ? `/${parts.slice(2).join('/')}` : '';
       return res(JSON.stringify(listChildren(fs, org, site, sub)), 200);
+    }
+    if (u.pathname === `/config/${org}`) {
+      if (method === 'POST') {
+        const raw = opts.body && typeof opts.body.get === 'function' ? opts.body.get('config') : null;
+        if (raw) orgConfig = JSON.parse(raw);
+        return res('{}', 200);
+      }
+      return orgConfig
+        ? res(JSON.stringify(orgConfig), 200, { 'content-type': 'application/json' })
+        : notFound();
     }
     return notFound();
   }

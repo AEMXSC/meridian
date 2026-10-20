@@ -26,7 +26,8 @@ import { daFetch, DA_ORIGIN, AEM_ADMIN } from '../../msm/core/fetch.js';
 import { getPageTimestamp, getPageStatus, getStatusConfig } from '../../msm/core/status.js';
 import { previewPage, publishPage } from '../../msm/core/operations.js';
 import { upsertRows, readSheet } from './da-config.js';
-import { parseLocaleConfig } from './locale-config.js';
+import { parseLocaleConfig, buildLocaleConfigDoc } from './locale-config.js';
+import { buildUpdatedConfig, findEditorPathRows, hasEditorPathForSite } from '../ew-setup/utils.js';
 import {
   markManaged, overwriteBlocked, publishRelPath, buildHreflangIndex,
 } from './managed.js';
@@ -250,6 +251,16 @@ export default class DaStore {
     return this.#sourceLocale;
   }
 
+  // The org/site this store reads and writes — so UI text that names the target of
+  // a write reads it from the store itself, never from a picker that may have moved.
+  get org() {
+    return this.#org;
+  }
+
+  get site() {
+    return this.#site;
+  }
+
   // The source language is the site's own pages, not a market — refuse to write
   // or publish it as a localized variant so Meridian can never overwrite the real
   // source page (which lives at the site root, outside the /meridian namespace).
@@ -302,6 +313,14 @@ export default class DaStore {
     return this.#writeJson(`${this.#base}/config.json`, config);
   }
 
+  // Merge `patch` into config.json over a FRESH read, so an edit made elsewhere
+  // since this session scanned (canonicalId, policies, …) isn't overwritten by a
+  // stale copy. A failed read throws before any write.
+  async updateConfig(patch) {
+    const current = (await this.readConfig()) ?? {};
+    await this.writeConfig({ ...current, ...patch });
+  }
+
   // DA's native localization config (/.da/translate.json) — read so Meridian's
   // setup surface can show the languages + do-not-translate rules DA already
   // knows, and register a new market's language there so Meridian complements
@@ -331,6 +350,61 @@ export default class DaStore {
   // discovery.
   async localeCatalog() {
     return parseLocaleConfig(await this.readLocaleConfigDoc());
+  }
+
+  // Change the site's declared target languages in translate-v2.json (the list the
+  // market picker, compare dropdown and coverage matrix read). Takes the author's
+  // DELTA — markets to add and codes to remove — and applies it to a FRESH read, so
+  // an edit made elsewhere since Setup opened (the DA localization app, another
+  // tab) is kept, not overwritten by a stale full list. Already-localized content
+  // is never touched. A failed read throws before any write; an unchanged list
+  // writes nothing. `sourceLocale` is the DRAFT source language (the store itself is
+  // only rebuilt with a new one after the save), so a source swap validates right.
+  async updateMarkets({ add = [], remove = [], sourceLocale = this.#sourceLocale }) {
+    const doc = await this.readLocaleConfigDoc();
+    const source = String(sourceLocale).toLowerCase();
+    add.forEach(({ code }) => {
+      if (String(code).toLowerCase() === source) {
+        throw new Error(`Refusing to localize into the source locale (${code}) — that is the source page itself, not a market.`);
+      }
+    });
+    const current = parseLocaleConfig(doc).languages.map(({ code, name }) => ({ code, name }));
+    const gone = new Set(remove);
+    const have = new Set(current.map((m) => m.code));
+    const added = add.filter((m) => !have.has(m.code));
+    if (!added.length && !current.some((m) => gone.has(m.code))) return;
+    const markets = [...current.filter((m) => !gone.has(m.code)), ...added];
+    await this.#writeJson('/.da/translate-v2.json', buildLocaleConfigDoc(doc, markets));
+  }
+
+  // Enable the Experience Workspace (DA canvas) editor for this site by adding its
+  // editor.path row to the org config KV (admin.da.live/config/{org}). Same
+  // anti-clobber builder the standalone ew-setup tool uses. Idempotent.
+  // Returns 'exists' | 'written'.
+  async enableExperienceWorkspace() {
+    const url = `${DA_ORIGIN}/config/${encodeURIComponent(this.#org)}`;
+    const denied = (verb, resp) => new Error(
+      resp.status === 401 || resp.status === 403
+        ? `No permission to ${verb} the org config.`
+        : `Config ${verb} failed (${resp.status}).`,
+    );
+    const read = await this.#fetch(url);
+    let existing = null;
+    if (read.status !== 404) {
+      if (!read.ok) throw denied('read', read);
+      try {
+        existing = await read.json();
+      } catch {
+        throw new Error('The org config is not valid JSON — leaving it unchanged.');
+      }
+      const { rows } = findEditorPathRows(existing);
+      if (hasEditorPathForSite(rows, this.#org, this.#site)) return 'exists';
+    }
+    const body = new FormData();
+    body.append('config', JSON.stringify(buildUpdatedConfig(existing, this.#org, this.#site)));
+    const write = await this.#fetch(url, { method: 'POST', body });
+    if (!write.ok) throw denied('write', write);
+    return 'written';
   }
 
   // The localization risk radar for one page across markets: compares the
