@@ -30,6 +30,9 @@ import { createTranslator } from './core/translate.js';
 import { humanizeSlug, chooseSlug } from './core/slug.js';
 import { splitLocalePrefix } from './core/locale-config.js';
 import {
+  STAGE_LABEL, RISK_LABEL, RISK_TIP, describeCell, resultBadge,
+} from './core/labels.js';
+import {
   addDraftMarket, removeDraftMarket, validateSetup, diffMarkets, isPartialModelConfig,
   PUBLISH_MODES,
 } from './core/setup.js';
@@ -68,7 +71,7 @@ const TABS = ['overview', 'pages', 'exposure', 'taste', 'adapt', 'setup'];
 
 // Plain-language one-liners for the jargon-y queue tabs (shown under the tabs).
 const TAB_HELP = {
-  exposure: 'Where markets are out of date, missing required content, or drifting from the source.',
+  exposure: 'Where locales are out of date, missing required content, or drifting from the source.',
   taste: 'Machine changes waiting for your approval before they go live.',
 };
 
@@ -80,16 +83,6 @@ const LANG_OPTIONS = [
   ['ko', 'Korean'], ['ar', 'Arabic'],
 ];
 
-// Business-readable labels for the freshness states (the internal tokens stay
-// current/stale/missing). Aligned to the vocabulary the official DA loc app
-// uses so Meridian feels native next to it.
-const RISK_LABEL = { current: 'Live', stale: 'Update due', missing: 'Not localized' };
-const RISK_TIP = {
-  current: 'Localized page is published and up to date with the source.',
-  stale: 'Source changed after this market was localized — re-localize to refresh.',
-  missing: 'This market has no localized page yet.',
-};
-
 // A raw Last-Modified value (epoch ms or an RFC1123 header string) → a short
 // human date for a status tooltip, or '' when unknown.
 function formatWhen(value) {
@@ -99,20 +92,9 @@ function formatWhen(value) {
   return new Date(ms).toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' });
 }
 
-// Render one coverage cell along both axes — stage (live/staged/none) and
-// freshness (stale) — into a label + chip class + tooltip.
-function cellDisplay(c) {
-  const when = c.at ? ` (${formatWhen(c.at)})` : '';
-  if (c.stage === 'none') return { label: '—', cls: 'missing', tip: 'Not localized' };
-  if (c.stage === 'staged') {
-    return c.fresh === 'stale'
-      ? { label: 'Staged ⚠', cls: 'stale', tip: `Staged in sandbox; source changed since${when} — re-localize before promoting` }
-      : { label: 'Staged', cls: 'staged', tip: `Reviewed in sandbox — awaiting promotion${when}` };
-  }
-  return c.fresh === 'stale'
-    ? { label: 'Update due', cls: 'stale', tip: `Live, but source changed since${when} — re-localize + promote` }
-    : { label: 'Live', cls: 'current', tip: `Promoted & live${when}` };
-}
+// One coverage cell: the chip is the publish state, with a separate "Source changed"
+// flag (see core/labels.js).
+const cellDisplay = (c) => describeCell(c, c.at ? ` (${formatWhen(c.at)})` : '');
 
 function parseDeepLink() {
   const params = new URLSearchParams(window.location.search);
@@ -1092,7 +1074,7 @@ class MeridianApp extends LitElement {
         </div>
         <div class="mrd-scorecard mrd-positive">
           <div class="mrd-score">${this._cleanCount}</div>
-          <div class="mrd-score-label">Clean markets</div>
+          <div class="mrd-score-label">Clean locales</div>
         </div>
       </div>
       <div class="mrd-list">${this._byLocale.map((g) => this.renderMarket(g))}</div>
@@ -1131,11 +1113,11 @@ class MeridianApp extends LitElement {
     const sub = `${item.ref}${item.requestedBy ? ` · requested by ${item.requestedBy}` : ''}`;
     return html`
       <nx-card heading=${item.locale} subheading=${sub}>
-        <span class="mrd-kind mrd-warning" style="align-self:flex-start">promote → live</span>
+        <span class="mrd-kind mrd-warning" style="align-self:flex-start">publish request</span>
         <span slot="actions">
           <sl-button ?disabled=${busy}
-            title="Promote the reviewed sandbox page to /${item.locale}/${item.ref}"
-            @click=${() => this.approvePromotion(item)}>Approve &amp; promote</sl-button>
+            title="Publish the reviewed sandbox page to /${item.locale}/${item.ref}"
+            @click=${() => this.approvePromotion(item)}>Approve &amp; publish</sl-button>
           <sl-button class="negative outline" ?disabled=${busy}
             @click=${() => this.rejectPromotion(item)}>Reject</sl-button>
         </span>
@@ -1149,7 +1131,7 @@ class MeridianApp extends LitElement {
     }
     return html`
       ${promos.length ? html`
-        <div class="mrd-section-label">Page promotions — approve to publish the reviewed page to its live locale URL</div>
+        <div class="mrd-section-label">Publish requests — approve to publish the reviewed page to its live locale URL</div>
         <div class="mrd-list">${promos.map((i) => this.renderPromotionItem(i))}</div>
       ` : nothing}
       ${this._queue.length ? html`
@@ -1372,7 +1354,7 @@ class MeridianApp extends LitElement {
       if (this._store !== store) return;
       console.error(e);
       this._setup = {
-        loadError: `Couldn't read this site's market list (${e.message}). Setup stays locked so it can't overwrite it.`,
+        loadError: `Couldn't read this site's locale list (${e.message}). Setup stays locked so it can't overwrite it.`,
       };
     }
   }
@@ -1410,7 +1392,7 @@ class MeridianApp extends LitElement {
     const abandoned = () => {
       if (this._store === store) return false;
       if (marketsSaved) {
-        this.showToast(`Market list saved for ${store.org}/${store.site}${configChanged ? '; the other settings were not applied' : ''}.`);
+        this.showToast(`Locale list saved for ${store.org}/${store.site}${configChanged ? '; the other settings were not applied' : ''}.`);
       }
       return true;
     };
@@ -1435,7 +1417,7 @@ class MeridianApp extends LitElement {
       console.error(e);
       if (this._store !== store) return;
       const partial = marketsSaved
-        ? ' The market list was saved; source language and publishing were not.' : '';
+        ? ' The locale list was saved; source language and publishing were not.' : '';
       this.setSetup({ busy: false, confirm: false, error: `Save failed: ${e.message}.${partial}` });
       // The market list may have changed even though the save didn't finish.
       this.loadCatalog();
@@ -1470,7 +1452,7 @@ class MeridianApp extends LitElement {
     };
     return html`
       <section class="mrd-setup-section">
-        <h3>Target markets</h3>
+        <h3>Target locales</h3>
         <p class="mrd-entry-meta">The languages this site localizes into. Removing one only takes it off this list — pages already localized stay as they are.</p>
         <div class="mrd-lang-chips">
           ${s.markets.length ? s.markets.map((m) => html`
@@ -1479,7 +1461,7 @@ class MeridianApp extends LitElement {
     markets: removeDraftMarket(this._setup.markets, m.code), confirm: false,
   })}>
               ${m.code} — ${m.name} ×
-            </button>`) : html`<span class="mrd-entry-meta">No markets yet — add one below.</span>`}
+            </button>`) : html`<span class="mrd-entry-meta">No locales yet — add one below.</span>`}
         </div>
         ${quick.length ? html`
           <div class="mrd-lang-chips" role="group" aria-label="Quick add">
@@ -1494,7 +1476,7 @@ class MeridianApp extends LitElement {
             .value=${s.custom.name} @keydown=${addOnEnter}
             @input=${(e) => this.setSetup({ custom: { ...this._setup.custom, name: e.target.value } })} />
           <sl-button class="primary outline"
-            @click=${() => this.addSetupMarket(s.custom.code, s.custom.name)}>Add market</sl-button>
+            @click=${() => this.addSetupMarket(s.custom.code, s.custom.name)}>Add locale</sl-button>
         </div>
         ${s.groups ? html`<p class="mrd-entry-meta">${s.groups} region group(s) are managed in the DA localization app and are left untouched.</p>` : nothing}
       </section>`;
@@ -1513,7 +1495,7 @@ class MeridianApp extends LitElement {
         in ${org}/${site}.
         ${add.length ? html`Adds: ${add.map((m) => m.code).join(', ')}.` : nothing}
         ${remove.length ? html`Removes: ${remove.join(', ')}.` : nothing}
-        ${wipe ? html`<strong>This removes every market from the list.</strong>` : nothing}
+        ${wipe ? html`<strong>This removes every locale from the list.</strong>` : nothing}
       </div>
       <div class="mrd-setup-row">
         <sl-button ?disabled=${s.busy} @click=${() => this.saveSetup()}>Confirm &amp; save</sl-button>
@@ -1556,7 +1538,7 @@ class MeridianApp extends LitElement {
         </div>`;
     }
     const modes = {
-      sandbox: ['Review first', 'Pages stage in a sandbox; you promote them to the live locale URL.'],
+      sandbox: ['Review first', 'Pages stage in a sandbox for review; you publish them to the live locale URL.'],
       'locale-root': ['Direct publish', 'Pages go straight to real locale URLs (e.g. /fr/page), skipping the sandbox review.'],
     };
     return html`
@@ -1566,7 +1548,7 @@ class MeridianApp extends LitElement {
         </p>
         <section class="mrd-setup-section">
           <h3>Source language</h3>
-          <p class="mrd-entry-meta">The language of the site's own pages — never a target market.</p>
+          <p class="mrd-entry-meta">The language of the site's own pages — never a target locale.</p>
           <input class="mrd-setup-input" aria-label="Source language code" .value=${s.sourceLocale}
             @input=${(e) => this.setSetup({ sourceLocale: e.target.value, confirm: false })} />
         </section>
@@ -1769,8 +1751,8 @@ class MeridianApp extends LitElement {
     return html`
       ${cat ? html`
         <div class="mrd-entry-meta mrd-mode-note">
-          No markets are set up for this site — showing common languages.
-          <button class="mrd-link" @click=${() => this.showSetup()}>Set up markets →</button>
+          No locales are set up for this site — showing common languages.
+          <button class="mrd-link" @click=${() => this.showSetup()}>Set up locales →</button>
         </div>` : nothing}
       <span class="mrd-lang-row">
         ${LANG_OPTIONS.filter(([code]) => notSource(code)).map(([code, name]) => this.renderChip(code, name))}
@@ -1908,7 +1890,7 @@ class MeridianApp extends LitElement {
             <div>
               <div class="mrd-overlay-title">Review &amp; edit — ${locale}</div>
               <div class="mrd-overlay-sub">
-              ${this._pageRef} · language ${pct}% · ${rows.length} segment(s) · leave a field blank to keep the source
+              ${this._pageRef} · translated ${pct}% · ${rows.length} segment(s) · leave a field blank to keep the source
             </div>
             </div>
             <button class="mrd-overlay-close" aria-label="Close"
@@ -1958,7 +1940,7 @@ class MeridianApp extends LitElement {
     this._pageBusy = true;
     this._pageError = '';
     try {
-      this._pageBusyMsg = `Checking ${ctx.locales.length} market(s)…`;
+      this._pageBusyMsg = `Checking ${ctx.locales.length} locale(s)…`;
       this._pageRisk = await this.pageRiskMultiSite(ctx.ref, ctx.locales, this._publishMode);
     } catch (e) {
       this._pageError = e.message;
@@ -2061,7 +2043,7 @@ class MeridianApp extends LitElement {
     this._pageBusy = true;
     this._pageError = '';
     try {
-      this._pageBusyMsg = `Promoting ${locale} to live…`;
+      this._pageBusyMsg = `Publishing ${locale}…`;
       // The sandbox page lives at its (possibly translated) slug; promote reads
       // and republishes at that path, while the manifest keeps the source ref.
       const target = slug || ref;
@@ -2070,9 +2052,9 @@ class MeridianApp extends LitElement {
         ref, locale, mode: 'locale-root', slug: target,
       }]);
       this.patchResult(locale, { promoted: true, liveUrl: pub.liveUrl, path: pub.path });
-      this.showToast(`Promoted ${locale} → live (${pub.path})`);
+      this.showToast(`Published ${locale} (${pub.path})`);
     } catch (e) {
-      this._pageError = `Promote failed for ${locale}: ${e.message}`;
+      this._pageError = `Publish failed for ${locale}: ${e.message}`;
     } finally {
       this._pageBusy = false;
     }
@@ -2142,7 +2124,7 @@ class MeridianApp extends LitElement {
       }]);
       await store.removePromotionRequest(item.locale, item.ref);
       this.dropPromotion(item.locale, item.ref);
-      this.showToast(`Approved & promoted ${item.locale} / ${item.ref} → live`);
+      this.showToast(`Approved & published ${item.locale} / ${item.ref}`);
       await this.loadQueue();
     } catch (e) {
       this._error = `Approve failed: ${e.message}`;
@@ -2264,7 +2246,7 @@ class MeridianApp extends LitElement {
     this._pageResults = new Map();
     this._localizeDrafts = new Map();
     const mode = this._publishMode;
-    this._pageBusyMsg = `Translating ${ctx.ref} → ${ctx.locales.length} market(s)…`;
+    this._pageBusyMsg = `Translating ${ctx.ref} → ${ctx.locales.length} locale(s)…`;
     try {
       const source = await ctx.store.readPageHtml(ctx.ref);
       const dnt = await ctx.store.readDnt().catch(() => []);
@@ -2310,7 +2292,7 @@ class MeridianApp extends LitElement {
         .filter(([, r]) => r.ok).map(([locale, r]) => ({
           ref: ctx.ref, locale, mode, slug: r.slug,
         })));
-      if (ok) this.showToast(`Translated & published ${ok} market(s) of ${ctx.ref}`);
+      if (ok) this.showToast(`Translated & published ${ok} locale(s) of ${ctx.ref}`);
     } catch (e) {
       this._pageError = e.message;
     } finally {
@@ -2342,7 +2324,7 @@ class MeridianApp extends LitElement {
     this._bulkResults = [];
     this._pageResults = new Map();
     const mode = this._publishMode;
-    this._pageBusyMsg = `Translating ${pages.length} page(s) × ${ctx.locales.length} market(s)…`;
+    this._pageBusyMsg = `Translating ${pages.length} page(s) × ${ctx.locales.length} locale(s)…`;
     try {
       const dnt = await ctx.store.readDnt().catch(() => []);
       // Read each page's source ONCE (not once per locale).
@@ -2424,7 +2406,7 @@ class MeridianApp extends LitElement {
         .filter((r) => r.ok).map((r) => ({
           ref: r.ref, locale: r.locale, mode, slug: r.slug,
         })));
-      this.showToast(`Translated ${ok}/${this._bulkResults.length} page × market ${label || ''}`.trim());
+      this.showToast(`Translated ${ok}/${this._bulkResults.length} page × locale ${label || ''}`.trim());
     } catch (e) {
       this._pageError = e.message;
     } finally {
@@ -2440,7 +2422,7 @@ class MeridianApp extends LitElement {
     const pages = [...this._selectedPages].slice(0, 50);
     if (!pages.length) { this._pageError = 'Select at least one page (check the boxes).'; return; }
     const locales = [...this._localeSel];
-    if (!locales.length) { this._pageError = 'Pick at least one target market.'; return; }
+    if (!locales.length) { this._pageError = 'Pick at least one target locale.'; return; }
     const cfg = this._config || {};
     const ctx = {
       locales,
@@ -2463,7 +2445,7 @@ class MeridianApp extends LitElement {
     this._pageResults = new Map();
     this._localizeDrafts = new Map();
     try {
-      this._pageBusyMsg = `Preparing ${ctx.ref} for ${ctx.locales.length} market(s)…`;
+      this._pageBusyMsg = `Preparing ${ctx.ref} for ${ctx.locales.length} locale(s)…`;
       this._localizeSource = await ctx.store.readPageHtml(ctx.ref);
       this._localizeRef = ctx.ref;
       // Bind the draft to the exact store + base org/site it was staged against,
@@ -2630,12 +2612,7 @@ class MeridianApp extends LitElement {
           <div class="mrd-detail">${r.error}</div>
         </div>`;
     }
-    const pct = Math.round((r.coverage?.ratio ?? 0) * 100);
-    const mem = r.memory ? ` · ${r.memory}% from memory` : '';
-    let badge = `translated · language ${pct}%${mem}`;
-    if (r.kind === 'staged') badge = 'staged — review, then promote';
-    else if (r.kind === 'live') badge = 'live — published';
-    else if (r.kind === 'localize') badge = `localized · language ${pct}% · market ${r.heldDone}/${r.heldTotal}${mem}`;
+    const badge = resultBadge(r);
     const previewing = this._previewOpen.has(locale);
     // The source pane is the picked page by default, but can compare against the
     // base language or any market's version of the same page (see compareSource).
@@ -2655,11 +2632,10 @@ class MeridianApp extends LitElement {
             ${r.mode === 'sandbox' && r.ref && !r.promoted ? html`
               <sl-button ?disabled=${this._pageBusy}
                 title="Publish this reviewed page to the live /${locale}/ URL"
-                @click=${() => this.promoteToLive(locale, r.ref, r.slug)}>Promote to live ↑</sl-button>
+                @click=${() => this.promoteToLive(locale, r.ref, r.slug)}>Publish ↑</sl-button>
               <sl-button class="primary outline" ?disabled=${this._pageBusy || r.requested}
                 @click=${() => this.requestPromotion(locale, r.ref, r.slug)}>${r.requested ? 'Approval requested ✓' : 'Request approval'}</sl-button>
             ` : nothing}
-            ${r.promoted ? html`<span class="mrd-kind mrd-positive">promoted → live</span>` : nothing}
             <sl-button class="mrd-row-more" title="More actions" ?disabled=${this._pageBusy}
               @click=${(e) => this.openRowMenu(e, r)}>⋯</sl-button>
           </span>
@@ -2667,7 +2643,7 @@ class MeridianApp extends LitElement {
         ${r.kind === 'translate' && r.review?.length ? html`
           <div class="mrd-entry-meta">
             ${r.review.length} segment(s) held in source language (market copy + low-confidence
-            translations) — use Localize to resolve them per market.
+            translations) — use Localize to resolve them per locale.
           </div>` : nothing}
         ${previewing ? html`
           <div class="mrd-preview">
@@ -2741,7 +2717,7 @@ class MeridianApp extends LitElement {
         <div class="mrd-market-head">
           <span class="mrd-locale">${locale}</span>
           <span class="mrd-kind mrd-positive">
-            language ${pct}% translated${draft.memory ? ` · ${draft.memory}% from memory` : ''}
+            ${pct}% translated${draft.memory ? ` · ${draft.memory}% from memory` : ''}
           </span>
           <sl-button class="mrd-page-publish primary outline" ?disabled=${this._pageBusy}
             @click=${() => { this._pageError = ''; this._overlayLocale = locale; }}>Review &amp; edit</sl-button>
@@ -2815,7 +2791,7 @@ class MeridianApp extends LitElement {
           @click=${() => this.pickPage(ref)}>${displayName}</button>
         ${status.length ? html`<span class="mrd-pick-status">${status.map((s) => html`
           <span class="mrd-risk-chip mrd-risk-${s.stage === 'live' ? 'current' : 'staged'}"
-            title="${s.locale}: ${s.stage}">${s.locale}</span>`)}</span>` : nothing}
+            title="${s.locale}: ${STAGE_LABEL[s.stage]}">${s.locale}</span>`)}</span>` : nothing}
       </li>`;
   }
 
@@ -2836,7 +2812,7 @@ class MeridianApp extends LitElement {
         ${this._rowMenu ? this.renderRowMenu(this._rowMenu) : nothing}
       </nx-popover>
       <div class="mrd-workbench">
-        <aside class="mrd-rail" aria-label="Page and market controls">
+        <aside class="mrd-rail" aria-label="Page and locale controls">
           ${this._publishMode === 'locale-root' ? html`
             <div class="mrd-entry-meta mrd-mode-note">
               <strong>Direct publish is on</strong> (configured): pages go straight to real locale
@@ -2850,7 +2826,7 @@ class MeridianApp extends LitElement {
               @click=${() => this.toggleBrowse()}>
               ${this._pageRef || 'Choose a page…'} <span class="mrd-tree-caret" aria-hidden="true">▾</span>
             </button>
-            <label id="mrd-lang-lbl">Markets</label>
+            <label id="mrd-lang-lbl">Locales</label>
             <span class="mrd-lang-chips" role="group" aria-labelledby="mrd-lang-lbl">
               ${this.renderLangChips()}
             </span>
@@ -2896,11 +2872,11 @@ class MeridianApp extends LitElement {
               <span>${this._pageBusyMsg || 'Working…'}</span>
             </div>` : nothing}
           ${this._bulkResults.length ? html`
-            <div class="mrd-section-label">Bulk translate — ${this._bulkResults.length} page × market</div>
+            <div class="mrd-section-label">Bulk translate — ${this._bulkResults.length} page × locale</div>
             <div class="mrd-matrix-wrap">
               <table class="mrd-matrix">
                 <thead>
-                  <tr><th scope="col">Page</th><th scope="col">Market</th><th scope="col">Result</th><th></th></tr>
+                  <tr><th scope="col">Page</th><th scope="col">Locale</th><th scope="col">Result</th><th></th></tr>
                 </thead>
                 <tbody>
                   ${this._bulkResults.map((r) => html`
@@ -2935,7 +2911,7 @@ class MeridianApp extends LitElement {
             </div>` : nothing}
           ${draftsHere ? html`
             <div class="mrd-section-label">
-              <span>Localize — author each market's commercial/compliance text, then publish per market:</span>
+              <span>Localize — author each locale's commercial/compliance text, then publish per locale:</span>
               <sl-button class="primary outline mrd-clear-drafts" ?disabled=${this._pageBusy}
                 @click=${() => this.clearDrafts()}>Clear drafts</sl-button>
             </div>
@@ -2947,10 +2923,10 @@ class MeridianApp extends LitElement {
     : nothing}
           ${hasCanvas ? nothing : html`
             <div class="mrd-canvas-empty">
-              <p>Pick a page and one or more markets, then <strong>Translate &amp; publish</strong> or
+              <p>Pick a page and one or more locales, then <strong>Translate &amp; publish</strong> or
               <strong>Localize</strong>.</p>
-              <p class="mrd-canvas-empty-sub">The source ↔ market comparison shows here, side by side,
-              ready to review and promote.</p>
+              <p class="mrd-canvas-empty-sub">The source ↔ locale comparison shows here, side by side,
+              ready to review and publish.</p>
             </div>`}
         </section>
       </div>
@@ -3074,13 +3050,13 @@ class MeridianApp extends LitElement {
           <div class="mrd-score">${this._matrix.length}</div><div class="mrd-score-label">Pages</div>
         </div>
         <div class="mrd-scorecard">
-          <div class="mrd-score">${locales.length}</div><div class="mrd-score-label">Markets</div>
+          <div class="mrd-score">${locales.length}</div><div class="mrd-score-label">Locales</div>
         </div>
         <div class="mrd-scorecard mrd-warning">
-          <div class="mrd-score">${staged}</div><div class="mrd-score-label">Staged · awaiting promotion</div>
+          <div class="mrd-score">${staged}</div><div class="mrd-score-label">In review · awaiting publish</div>
         </div>
         <div class="mrd-scorecard mrd-positive">
-          <div class="mrd-score">${live}</div><div class="mrd-score-label">Live</div>
+          <div class="mrd-score">${live}</div><div class="mrd-score-label">Published</div>
         </div>
         <sl-button class="primary outline mrd-matrix-refresh" ?disabled=${this._matrixBusy}
           @click=${() => this.loadMatrix()}>Refresh</sl-button>
@@ -3107,12 +3083,12 @@ class MeridianApp extends LitElement {
         ? () => this.reviewStaged(row.ref, c.locale)
         : () => this.localizeFromMatrix(row.ref, c.locale);
       const tip = c.stage === 'staged'
-        ? `Review & promote ${c.locale} · ${d.tip}`
+        ? `Review & publish ${c.locale} · ${d.tip}`
         : `Localize ${row.ref} → ${c.locale}`;
       return html`
                   <td>
                     <button class="mrd-matrix-cell" @click=${act} title=${tip}>
-                      <span class="mrd-risk-chip mrd-risk-${d.cls}">${d.label}</span>
+                      <span class="mrd-risk-chip mrd-risk-${d.cls}">${d.label}</span>${d.changed ? html`<span class="mrd-risk-chip mrd-risk-stale" title=${RISK_TIP.stale}>${RISK_LABEL.stale}</span>` : nothing}
                     </button>
                   </td>`;
     }
@@ -3123,7 +3099,7 @@ class MeridianApp extends LitElement {
                       href=${this.localizedEdgeUrl(row.ref, c.locale, 'live')}
                       target="_blank" rel="noopener"
                       title=${`Open live ${c.locale} page · ${d.tip}`}>
-                      <span class="mrd-risk-chip mrd-risk-${d.cls}">${d.label}</span>
+                      <span class="mrd-risk-chip mrd-risk-${d.cls}">${d.label}</span>${d.changed ? html`<span class="mrd-risk-chip mrd-risk-stale" title=${RISK_TIP.stale}>${RISK_LABEL.stale}</span>` : nothing}
                     </a>
                   </td>`;
   })}

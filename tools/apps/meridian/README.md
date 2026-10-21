@@ -15,7 +15,7 @@ like the other apps in `adobe-rnd/aem-apps`. All content it manages is scoped un
 
 | Surface | Where | Does |
 | --- | --- | --- |
-| Full-page app | `tools/apps/meridian/meridian.html` | Five tabs: **Dashboard** (staged/live coverage) · **Pages** (Translate / Localize / Promote) · **Issues** (exposure) · **Approvals** (promotion requests + taste queue) · **Market rules** (adaptation authoring + New-market setup) |
+| Full-page app | `tools/apps/meridian/meridian.html` | Six tabs: **Dashboard** (in review / published coverage) · **Pages** (Translate / Localize / Publish) · **Issues** (exposure) · **Approvals** (publish requests + taste queue) · **Market rules** (adaptation authoring + New-market setup) · **Setup** (locales, source language, publishing) |
 | Prepare-menu plugin | `tools/plugins/meridian/meridian.html` | Per-page exposure summary + deep-link into the app |
 | Engine | `tools/apps/meridian/core/` | Pure, node-testable JS (no DA/https imports): `schemas`, `hash`, `materialize`, `exposure`, `scan`, `diff`, `propagate`, `scoring`, `classify`, `propose`, `migrate`, `locale-config`, `quality`, `tm`, `eds-html`, `localize-page`, `managed`, `variant-status`, `da-config`, `concurrency` |
 | DA client | `tools/apps/meridian/core/store.js` | `DaStore` — all DA reads/writes + preview/publish; injectable `fetchImpl` for tests |
@@ -123,23 +123,23 @@ Phrase, a private model) and wire it into `handleTranslate`. Only the **language
 layer is machine-translated; commercial/compliance stay human-owned (PRD §11), and
 every machine result is quality-gated before publish.
 
-## Staging → review → promote (how pages reach live)
+## Staging → review → publish (how pages reach live)
 
 The default flow has one path to production, so review is never skipped:
 
 1. **Stage** — Translate/Localize always writes to the **sandbox** working area
    (`/meridian/live/{locale}/{ref}`): namespaced, collision-free, safe to iterate.
 2. **Review** — side-by-side preview, the overlay segment editor, the coverage dashboard.
-3. **Promote to live** — copy the *reviewed* page byte-for-byte to its clean,
+3. **Publish** — copy the *reviewed* page byte-for-byte to its clean,
    SEO-correct locale URL `/{locale}/{ref}` (e.g. `/fr/international-banking`).
    Two routes, both on the page's result row:
-   - **Promote to live** — self-review, one click.
+   - **Publish** — self-review, one click.
    - **Request approval** — a *different* reviewer approves in the **Approvals** tab
      (`store.promotePage` runs under the approver's own DA session). The governed,
      "nothing goes live without a named human" path.
 
 The canonical object + adaptation layers always stay internal under `/meridian`;
-only the *rendered page* is promoted. The live locale path is derived from DA's
+only the *rendered page* is published. The live locale path is derived from DA's
 `translate-v2.json` `location` convention.
 
 **Advanced opt-out (no UI):** set `publishMode: 'locale-root'` in

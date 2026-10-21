@@ -1048,6 +1048,16 @@ nx-tabs {
   border-radius: var(--mrd-radius-pill);
 }
 
+/* A cell can carry two chips (publish state + "Source changed"): keep them apart
+   and on one line each. */
+.mrd-risk-chip + .mrd-risk-chip {
+  margin-left: 6px;
+}
+
+.mrd-matrix-cell .mrd-risk-chip {
+  white-space: nowrap;
+}
+
 .mrd-risk-chip .mrd-risk-locale {
   font-weight: 700;
   text-transform: none;
@@ -1382,8 +1392,7 @@ fieldset.mrd-setup-section {
 }
 
 .mrd-setup .mrd-lang-chips {
-  flex-direction: row;
-  flex-wrap: wrap;
+  flex-flow: row wrap;
 }
 
 .mrd-setup-row {

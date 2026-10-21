@@ -18,6 +18,7 @@ import { LitElement, html, nothing } from 'da-lit';
 import DA_SDK from 'https://da.live/nx/utils/sdk.js';
 import DaStore from '../../apps/meridian/core/store.js';
 import { setDaFetch } from '../../apps/msm/core/fetch.js';
+import { STAGE_LABEL, RISK_LABEL } from '../../apps/meridian/core/labels.js';
 
 // The editor plugin's reference/status panel: for the page an author is editing,
 // show where it lives in every market (live / staged / not localized) — the AEM
@@ -26,7 +27,10 @@ import { setDaFetch } from '../../apps/msm/core/fetch.js';
 const APP_URL = 'https://da.live/app/AEMXSC/meridian/tools/apps/meridian/meridian';
 const NX = 'https://da.live/nx';
 
-const STATUS_LABEL = { live: 'Live', staged: 'Staged', missing: 'Not localized' };
+// Same publish-state vocabulary as the app (core/labels.js).
+const STATUS_LABEL = {
+  live: STAGE_LABEL.live, staged: STAGE_LABEL.staged, missing: STAGE_LABEL.none,
+};
 
 let nexter = null;
 let tokens = null;
@@ -113,7 +117,7 @@ class DaMeridian extends LitElement {
         <span class="mrd-dot mrd-dot-${row.status}" aria-hidden="true"></span>
         <span class="mrd-locale">${row.locale}</span>
         <span class="mrd-status mrd-status-${row.status}">
-          ${label}${row.stale ? html` <span class="mrd-stale" title="Source changed since this was localized">· update due</span>` : nothing}
+          ${label}${row.stale ? html` <span class="mrd-stale" title="Source changed since this was localized">· ${RISK_LABEL.stale}</span>` : nothing}
         </span>
         <span class="mrd-row-actions">
           ${row.status === 'missing'
@@ -126,8 +130,8 @@ class DaMeridian extends LitElement {
   }
 
   render() {
-    if (this._state === 'loading') return html`<p class="mrd-msg">Checking markets…</p>`;
-    if (this._state === 'no-page') return html`<p class="mrd-msg">Open a page to see its markets.</p>`;
+    if (this._state === 'loading') return html`<p class="mrd-msg">Checking locales…</p>`;
+    if (this._state === 'no-page') return html`<p class="mrd-msg">Open a page to see its locales.</p>`;
     if (this._state === 'error') return html`<p class="mrd-msg mrd-err">${this._error}</p>`;
 
     const s = this._summary;
@@ -135,14 +139,14 @@ class DaMeridian extends LitElement {
       <div class="mrd-head">
         <span class="mrd-page-ref" title=${this._ref}>${this._ref}</span>
         <span class="mrd-counts">
-          <span class="mrd-count mrd-count-live">${s.live ?? 0} live</span>
-          <span class="mrd-count mrd-count-staged">${s.staged ?? 0} staged</span>
-          <span class="mrd-count mrd-count-missing">${s.missing ?? 0} missing</span>
+          <span class="mrd-count mrd-count-live">${s.live ?? 0} published</span>
+          <span class="mrd-count mrd-count-staged">${s.staged ?? 0} in review</span>
+          <span class="mrd-count mrd-count-missing">${s.missing ?? 0} not localized</span>
         </span>
       </div>
       ${this._rows.length
     ? html`<div class="mrd-markets">${this._rows.map((r) => this.renderRow(r))}</div>`
-    : html`<p class="mrd-msg">No markets configured for this site yet. Open Meridian to translate this page.</p>`}
+    : html`<p class="mrd-msg">No locales configured for this site yet. Open Meridian to translate this page.</p>`}
       <div class="mrd-actions">
         <a class="mrd-open" href=${this._appLink({ page: this._ref, tab: 'pages' })} target="_blank" rel="noopener">
           Open in Meridian ↗
